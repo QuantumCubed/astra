@@ -1,0 +1,73 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(obsidian/**)",
+      "Write(obsidian/**)",
+      "Bash(cargo *)",
+      "PowerShell(cargo *)",
+      "Bash(ls)",
+      "Bash(ls *)",
+      "PowerShell(ls)",
+      "PowerShell(ls *)",
+      "Bash(cat *)",
+      "PowerShell(cat *)",
+      "Bash(pwd)",
+      "PowerShell(pwd)",
+      "Bash(echo *)",
+      "PowerShell(echo *)",
+      "mcp__plugin_github_github__get_commit",
+      "mcp__plugin_github_github__get_file_contents",
+      "mcp__plugin_github_github__get_label",
+      "mcp__plugin_github_github__get_latest_release",
+      "mcp__plugin_github_github__get_me",
+      "mcp__plugin_github_github__get_release_by_tag",
+      "mcp__plugin_github_github__get_tag",
+      "mcp__plugin_github_github__get_team_members",
+      "mcp__plugin_github_github__get_teams",
+      "mcp__plugin_github_github__issue_read",
+      "mcp__plugin_github_github__list_branches",
+      "mcp__plugin_github_github__list_commits",
+      "mcp__plugin_github_github__list_issue_fields",
+      "mcp__plugin_github_github__list_issue_types",
+      "mcp__plugin_github_github__list_issues",
+      "mcp__plugin_github_github__list_pull_requests",
+      "mcp__plugin_github_github__list_releases",
+      "mcp__plugin_github_github__list_repository_collaborators",
+      "mcp__plugin_github_github__list_tags",
+      "mcp__plugin_github_github__pull_request_read",
+      "mcp__plugin_github_github__search_code",
+      "mcp__plugin_github_github__search_commits",
+      "mcp__plugin_github_github__search_issues",
+      "mcp__plugin_github_github__search_pull_requests",
+      "mcp__plugin_github_github__search_repositories",
+      "mcp__plugin_github_github__search_users"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Edit(.env)",
+      "Write(.env)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$j=[Console]::In.ReadToEnd()|ConvertFrom-Json; if($j.tool_input.file_path -match '\\.rs$'){cargo check; if($LASTEXITCODE -eq 0){Write-Output 'NOTE: cargo check passed - consider updating Obsidian notes if this change is significant.'}}; exit 0",
+            "shell": "powershell",
+            "timeout": 60,
+            "statusMessage": "Running cargo check..."
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "context7@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "github@claude-plugins-official": true
+  }
+}
