@@ -19,20 +19,6 @@
               "icon": "lucide-git-fork",
               "title": "Graph view"
             }
-          },
-          {
-            "id": "67769799c2534bfd",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "ASTRA.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "ASTRA"
-            }
           }
         ]
       },
@@ -44,6 +30,7 @@
           {
             "id": "21a1d5adbb0713b6",
             "type": "leaf",
+            "pinned": true,
             "state": {
               "type": "markdown",
               "state": {
@@ -51,11 +38,55 @@
                 "mode": "source",
                 "source": false
               },
+              "pinned": true,
               "icon": "lucide-file",
               "title": "ASTRA"
             }
+          },
+          {
+            "id": "7f9c891e61ee0a93",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Architecture.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Architecture"
+            }
+          },
+          {
+            "id": "c15ee3f94785c4a3",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Roadmap.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Roadmap"
+            }
+          },
+          {
+            "id": "b98ed49b8388539b",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Decisions.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Decisions"
+            }
           }
-        ]
+        ],
+        "currentTab": 2
       }
     ],
     "direction": "vertical"
@@ -128,6 +159,7 @@
             "state": {
               "type": "backlink",
               "state": {
+                "file": "Roadmap.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -137,7 +169,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks"
+              "title": "Backlinks for Roadmap"
             }
           },
           {
@@ -146,11 +178,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
+                "file": "Roadmap.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links"
+              "title": "Outgoing links from Roadmap"
             }
           },
           {
@@ -188,12 +221,13 @@
             "state": {
               "type": "outline",
               "state": {
+                "file": "Roadmap.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline"
+              "title": "Outline of Roadmap"
             }
           }
         ]
@@ -214,27 +248,27 @@
       "bases:Create new base": false
     }
   },
-  "active": "86eb8927f353e09e",
+  "active": "c15ee3f94785c4a3",
   "lastOpenFiles": [
-    "ASTRA.md",
-    "ASTRA.md.tmp.39336.34a311353d81",
-    "Reviews/REVIEWS.md",
-    "Reviews/REVIEWS.md.tmp.39336.7d76a98d68d4",
+    "Decisions.md",
+    "Roadmap.md.tmp.420300.1d95daf2788a",
+    "Progress.md",
+    "Roadmap.md",
+    "Architecture.md",
     "Learning/concepts.md",
     "Learning/LEARNING.md",
-    "Roadmap.md",
-    "Decisions.md",
-    "Todos.md.tmp.392832.669161cbeaff",
-    "ASTRA.md.tmp.392832.82eea125f7ce",
-    "Roadmap.md.tmp.392832.940edfdfbc1a",
-    "Decisions.md.tmp.392832.f2ded336e313",
-    "Progress.md",
-    "ASTRA.md.tmp.392832.cace932bf46e",
-    "Learning/concepts.md.tmp.392832.42bfb9fec835",
-    "Learning",
+    "Reviews/REVIEWS.md",
     "Todos.md",
-    "ASTRA.md.tmp.392832.316e15d54771",
-    "Architecture.md",
+    "Decisions.md.tmp.420300.6357f160ae28",
+    "Roadmap.md.tmp.420300.0e272f545add",
+    "Todos.md.tmp.420300.14024af414e3",
+    "Todos.md.tmp.420300.b247a98d8787",
+    "Roadmap.md.tmp.420300.8a482007eb2a",
+    "Roadmap.md.tmp.420300.4fbd53d0974f",
+    "Decisions.md.tmp.420300.af99db980270",
+    "Architecture.md.tmp.420300.58ba37f599b6",
+    "Decisions.md.tmp.420300.c7afa110d91f",
+    "ASTRA.md",
     "Welcome.md"
   ]
 }

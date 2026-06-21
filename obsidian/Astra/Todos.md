@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-20
 ---
 
 # Todos
@@ -15,15 +15,22 @@ _Nothing active yet — ready to start Phase 1._
 
 ### Phase 1 — WebSocket Foundation
 
+**Step 1 — Basic text flow**
 - [ ] Define WebSocket message schema (type discriminator: text_message, text_chunk, tool_call, tool_result, error, audio_chunk)
 - [ ] Replace HTTP routes with a `/ws` WebSocket handler in Axum
 - [ ] Stateful multi-turn conversation scoped to the WebSocket connection
-- [ ] Streaming LLM responses token-by-token over WebSocket
+- [ ] Streaming LLM responses token-by-token; branch on `content` vs `tool_calls` in first chunk
+
+**Step 2 — System configuration**
+- [ ] Create `config/core/` and `config/user/` directory structure with starter files
+- [ ] Load and assemble config files into a single system prompt at startup
+- [ ] Compute sliding window size N dynamically from context window minus system prompt size
+- [ ] Enforce sliding window on messages array before every Ollama request
 
 ### Phase 2 — Tool Layer
 
 - [ ] Refactor tool implementations into per-tool modules
-- [ ] Structured tool error handling
+- [ ] Structured tool error handling (tool failures must not crash the request)
 - [ ] Define and implement first real tool
 
 ### Later

@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-20
 ---
 
 # Architecture
@@ -42,6 +42,34 @@ HTTP client
 | `src/tools/dispatch.rs` | Routes tool call by name to implementation |
 | `src/tools/implementations.rs` | Concrete tool logic (shell commands) |
 | `src/integrations/script/` | Shell scripts invoked by tool implementations |
+
+## Conversation State
+
+Ollama is fully stateless — it has no memory between API calls. Astra owns the `messages` array for each active session and replays the full history on every request to Ollama. The system prompt is prepended to this array on every call.
+
+To prevent unbounded growth, Astra applies a **sliding window**: always keep the system prompt + the last N message turns, dropping the oldest when the limit is reached. N is computed at startup as `max_context_tokens - system_prompt_tokens - response_buffer` — the system prompt is always guaranteed to fit; conversation history fills the remaining space.
+
+Current storage: **in-memory per session** (lost on server restart). Persistence deferred.
+
+## Model Configuration
+
+Behavioral config is split into two layers, assembled at startup into a single system prompt injected into every Ollama request:
+
+```
+config/
+  core/
+    identity.md       # what Astra is, what it can do
+    tools.md          # rules around tool use
+    behavior.md       # hard constraints
+  user/
+    personality.md    # name, tone, persona
+    collaboration.md  # how it works with the user
+    coding-style.md   # preferences when writing code
+```
+
+Core is loaded first, user config appended after. Core uses hard constraint language; user config covers softer preferences. User files can be absent without error. The combined token count determines the sliding window size N.
+
+Hardware/runtime tuning (`num_ctx`, GPU offload, thread count) is managed via an Ollama Modelfile on the host machine and is outside Astra's scope.
 
 ## Current Tools
 
