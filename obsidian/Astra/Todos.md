@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-20
+updated: 2026-06-21
 ---
 
 # Todos
@@ -9,17 +9,17 @@ updated: 2026-06-20
 
 ## In Progress
 
-_Nothing active yet — ready to start Phase 1._
-
-## Backlog
-
 ### Phase 1 — WebSocket Foundation
 
 **Step 1 — Basic text flow**
-- [ ] Define WebSocket message schema (type discriminator: text_message, text_chunk, tool_call, tool_result, error, audio_chunk)
-- [ ] Replace HTTP routes with a `/ws` WebSocket handler in Axum
+- [x] Define WebSocket message schema (Envelope + Message enum in `src/protocol.rs`)
+- [x] Replace HTTP routes with a `/ws` WebSocket handler in Axum (`src/handlers/ws_handler.rs`)
+- [ ] Complete `src/conversation.rs` — `add_user_turn`, `add_assistant_turn`, `messages()` 
+- [ ] Wire Ollama call into `ws_handler` — parse TextMessage, call chat, send TextChunk response
 - [ ] Stateful multi-turn conversation scoped to the WebSocket connection
 - [ ] Streaming LLM responses token-by-token; branch on `content` vs `tool_calls` in first chunk
+
+## Backlog
 
 **Step 2 — System configuration**
 - [ ] Create `config/core/` and `config/user/` directory structure with starter files
@@ -30,6 +30,7 @@ _Nothing active yet — ready to start Phase 1._
 ### Phase 2 — Tool Layer
 
 - [ ] Refactor tool implementations into per-tool modules
+- [ ] Move `OllamaMessage` and `ChatRequest` types out of `req_handler.rs` into `ollama_client`
 - [ ] Structured tool error handling (tool failures must not crash the request)
 - [ ] Define and implement first real tool
 

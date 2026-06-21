@@ -9,6 +9,7 @@ mod state;
 mod tools;
 mod protocol;
 mod conversation;
+mod config;
 
 use crate::handlers::ws_handler::ws_handler;
 use crate::state::AppState;

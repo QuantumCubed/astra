@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-20
+updated: 2026-06-21
 ---
 
 # Architecture
@@ -9,25 +9,24 @@ updated: 2026-06-20
 
 ## Overview
 
-Astra is a Rust/Axum HTTP server running on port `3000`. It sits between HTTP clients and a remote Ollama instance, forwarding requests and handling tool calls that the LLM returns.
+Astra is a Rust/Axum WebSocket server running on port `3000`. It bridges WebSocket clients to a local Ollama instance, maintaining per-connection conversation state and dispatching tool calls returned by the model.
 
 ## Request Flow
 
 ```
-HTTP client
+WebSocket client
     └── Axum router (src/main.rs)
-            ├── GET  /ollama    → list available models
-            ├── POST /generate  → single-turn text generation
-            └── POST /chat      → chat with tool-use loop
+            └── GET /ws → WebSocket upgrade
                     ↓
-            ollama_client::async_client
-            (HTTP to Ollama REST API)
-                    ↓
-            model response contains tool_calls?
-              YES → tools::dispatch::dispatch_tool()
-                        └── tools::implementations
-                                └── shell commands / scripts
-              NO  → return message directly
+            ws_handler::handle_socket (per-connection async loop)
+                    ├── Parses incoming Envelope (src/protocol.rs)
+                    ├── Maintains conversation via Conversation (src/conversation.rs)
+                    │       └── Sliding window token management
+                    └── ollama_client::async_client (HTTP to Ollama REST API)
+                            ↓
+                    model response:
+                      tool_calls? → dispatch → implementations → continue loop
+                      text?       → stream TextChunk envelopes back to client
 ```
 
 ## Modules
@@ -36,8 +35,11 @@ HTTP client
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init |
 | `src/state.rs` | `AppState` — shared state holding registered tools |
-| `src/handlers/req_handler.rs` | Axum handlers, request/response types |
+| `src/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
+| `src/handlers/ws_handler.rs` | WebSocket connection handler, per-connection message loop |
+| `src/conversation.rs` | Conversation state — message history, sliding window enforcement |
 | `src/ollama_client/async_client.rs` | HTTP client wrapper for Ollama API |
+| `src/handlers/req_handler.rs` | Legacy HTTP handlers (to be retired); owns `OllamaMessage`, `ChatRequest` types until refactored |
 | `src/tools/registry.rs` | Tool definitions, `register_tools()` |
 | `src/tools/dispatch.rs` | Routes tool call by name to implementation |
 | `src/tools/implementations.rs` | Concrete tool logic (shell commands) |

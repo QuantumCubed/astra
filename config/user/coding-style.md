@@ -1,0 +1,1 @@
+When writing or reviewing code, default to the language already in use. Prefer readable, straightforward code over clever one-liners. Add comments only when the intent is non-obvious. Do not add error handling or abstractions beyond what is needed for the task at hand.

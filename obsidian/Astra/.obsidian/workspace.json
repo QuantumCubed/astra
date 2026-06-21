@@ -84,9 +84,23 @@
               "icon": "lucide-file",
               "title": "Decisions"
             }
+          },
+          {
+            "id": "faf1a08f3ed543f0",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Learning/concepts.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "concepts"
+            }
           }
         ],
-        "currentTab": 2
+        "currentTab": 4
       }
     ],
     "direction": "vertical"
@@ -159,7 +173,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Roadmap.md",
+                "file": "Learning/concepts.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -169,7 +183,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Roadmap"
+              "title": "Backlinks for concepts"
             }
           },
           {
@@ -178,12 +192,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Roadmap.md",
+                "file": "Learning/concepts.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from Roadmap"
+              "title": "Outgoing links from concepts"
             }
           },
           {
@@ -221,13 +235,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "Roadmap.md",
+                "file": "Learning/concepts.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Roadmap"
+              "title": "Outline of concepts"
             }
           }
         ]
@@ -248,26 +262,26 @@
       "bases:Create new base": false
     }
   },
-  "active": "c15ee3f94785c4a3",
+  "active": "faf1a08f3ed543f0",
   "lastOpenFiles": [
+    "Learning/LEARNING.md",
+    "Roadmap.md",
+    "Learning/concepts.md.tmp.385492.0aa30928d1da",
+    "Learning/concepts.md.tmp.385492.6828659d93e0",
+    "Learning/concepts.md.tmp.385492.6b6d75254dbd",
+    "Learning/concepts.md.tmp.385492.d332d0884de9",
+    "Progress.md.tmp.385492.51d21424a5e6",
+    "Progress.md.tmp.385492.4bb809faf69a",
+    "Todos.md.tmp.385492.15387ff5063f",
+    "Architecture.md.tmp.385492.77e39a6e6989",
+    "ASTRA.md.tmp.385492.6a01b938f602",
     "Decisions.md",
     "Roadmap.md.tmp.420300.1d95daf2788a",
     "Progress.md",
-    "Roadmap.md",
     "Architecture.md",
     "Learning/concepts.md",
-    "Learning/LEARNING.md",
     "Reviews/REVIEWS.md",
     "Todos.md",
-    "Decisions.md.tmp.420300.6357f160ae28",
-    "Roadmap.md.tmp.420300.0e272f545add",
-    "Todos.md.tmp.420300.14024af414e3",
-    "Todos.md.tmp.420300.b247a98d8787",
-    "Roadmap.md.tmp.420300.8a482007eb2a",
-    "Roadmap.md.tmp.420300.4fbd53d0974f",
-    "Decisions.md.tmp.420300.af99db980270",
-    "Architecture.md.tmp.420300.58ba37f599b6",
-    "Decisions.md.tmp.420300.c7afa110d91f",
     "ASTRA.md",
     "Welcome.md"
   ]

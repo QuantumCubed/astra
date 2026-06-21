@@ -1,11 +1,11 @@
 ---
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-21
 ---
 
 # Astra
 
-AI Personal Assistant — Rust/Axum HTTP server that bridges HTTP clients to a local Ollama LLM, with a tool-dispatch layer for executing local integrations.
+AI Personal Assistant — Rust/Axum WebSocket server that bridges clients to a local Ollama LLM, with a tool-dispatch layer for executing local integrations.
 
 ## Notes
 

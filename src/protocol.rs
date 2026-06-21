@@ -2,31 +2,31 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct TextMessagePayload {
-    content: String
+    pub content: String,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct TextChunkPayload {
-    content: String,
-    done: bool
+    pub content: String,
+    pub done: bool,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ToolCallPayload {
-    name: String,
-    args: serde_json::Value
+    pub name: String,
+    pub args: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ToolResultPayload {
-    name: String,
-    result: String
+    pub name: String,
+    pub result: String,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ErrorPayload {
-    message: String,
-    code: String
+    pub message: String,
+    pub code: String,
 }
 
 // Audio: handled as binary WebSocket frames, not JSON messages
@@ -39,12 +39,12 @@ pub enum Message {
     TextChunk(TextChunkPayload),
     ToolCall(ToolCallPayload),
     ToolResult(ToolResultPayload),
-    Error(ErrorPayload)
+    Error(ErrorPayload),
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Envelope {
-    request_id: Option<String>,
+    pub request_id: Option<String>,
     #[serde(flatten)]
-    message: Message,
+    pub message: Message,
 }
