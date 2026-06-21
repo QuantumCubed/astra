@@ -8,6 +8,7 @@ mod ollama_client;
 mod state;
 mod tools;
 mod protocol;
+mod conversation;
 
 use crate::handlers::ws_handler::ws_handler;
 use crate::state::AppState;

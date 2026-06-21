@@ -38,12 +38,12 @@ pub struct GenRequest {
 pub struct ChatRequest {
     pub model: String,
     pub stream: bool,
-    pub messages: Vec<Message>,
+    pub messages: Vec<OllamaMessage>,
     pub tools: Vec<Tool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Message {
+pub struct OllamaMessage {
     pub role: String,
     pub content: String,
 }
@@ -78,7 +78,7 @@ pub async fn chat_model(
     let req = ChatRequest {
         model: "qwen3.5:9b".to_string(),
         stream: false,
-        messages: vec![Message {
+        messages: vec![OllamaMessage {
             role: "user".to_string(),
             content: payload.prompt,
         }],
