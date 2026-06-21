@@ -70,40 +70,40 @@ pub async fn generate_model(
     Ok(Json(data))
 }
 
-pub async fn chat_model(
-    State(state): State<AppState>,
-    Json(payload): Json<GenerateRequest>,
-) -> Result<Json<Value>, AppError> {
-    // println!("{:#?}", state.tools);
-    let req = ChatRequest {
-        model: "qwen3.5:9b".to_string(),
-        stream: false,
-        messages: vec![OllamaMessage {
-            role: "user".to_string(),
-            content: payload.prompt,
-        }],
-        tools: state.tools.clone(),
-    };
+// pub async fn chat_model(
+//     State(state): State<AppState>,
+//     Json(payload): Json<GenerateRequest>,
+// ) -> Result<Json<Value>, AppError> {
+//     // println!("{:#?}", state.tools);
+//     let req = ChatRequest {
+//         model: "qwen3.5:9b".to_string(),
+//         stream: false,
+//         messages: vec![OllamaMessage {
+//             role: "user".to_string(),
+//             content: payload.prompt,
+//         }],
+//         tools: state.tools.clone(),
+//     };
 
-    let response = async_client::chat(req).await.map_err(AppError)?;
+//     let response = async_client::chat(req).await.map_err(AppError)?;
     
-    // check if the model wants to call a tool
-    if let Some(tool_calls) = response["message"]["tool_calls"].as_array() {
-        let mut results = vec![];
+//     // check if the model wants to call a tool
+//     if let Some(tool_calls) = response["message"]["tool_calls"].as_array() {
+//         let mut results = vec![];
 
-        for tool_call in tool_calls {
-            let tool_name = tool_call["function"]["name"]
-                .as_str()
-                .unwrap_or_default();
+//         for tool_call in tool_calls {
+//             let tool_name = tool_call["function"]["name"]
+//                 .as_str()
+//                 .unwrap_or_default();
 
-            let args = tool_call["function"]["arguments"].clone();
+//             let args = tool_call["function"]["arguments"].clone();
 
-            let result = dispatch::dispatch_tool(tool_name, args).await;
-            results.push(result);
-        }
+//             let result = dispatch::dispatch_tool(tool_name, args).await;
+//             results.push(result);
+//         }
 
-        return Ok(Json(serde_json::json!({ "tool_results": results })));
-    }
-    // no tool call, just return the message
-    Ok(Json(response))
-}
+//         return Ok(Json(serde_json::json!({ "tool_results": results })));
+//     }
+//     // no tool call, just return the message
+//     Ok(Json(response))
+// }

@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-22
+updated: 2026-06-21
 ---
 
 # Concepts
@@ -8,6 +8,33 @@ updated: 2026-06-22
 [[LEARNING]]
 
 A running log of Rust concepts, patterns, and principles encountered during development of Astra. Entries marked **Claude** were explained during a session. Entries marked **Self-discovered** were figured out independently.
+
+---
+
+## Async Byte Stream Iteration with `StreamExt`
+**Date:** 2026-06-21
+**Context:** Implementing streaming Ollama responses in `ws_handler.rs`
+**Source:** Claude
+
+`reqwest::Response::bytes_stream()` converts an HTTP response body into an async stream of raw byte chunks that arrive as the server sends them. To iterate an async stream, you need the `StreamExt` trait from the `futures` crate — it adds the `.next()` method, which awaits the next chunk. Without importing `StreamExt`, the stream has no way to advance. The pattern `while let Some(Ok(chunk)) = stream.next().await` handles both stream termination (`None`) and chunk errors (`Err`) in one expression.
+
+---
+
+## Line Buffering Pattern with `drain`
+**Date:** 2026-06-21
+**Context:** Parsing NDJSON from Ollama's streaming response in `ws_handler.rs`
+**Source:** Claude
+
+Network byte chunks don't align to application-level boundaries like newlines. A chunk may contain half a JSON line, or two and a half. The line buffering pattern handles this: append each chunk to a `String` buffer, then loop calling `find('\n')` — if a newline is found, a complete line is available. `drain(..=pos)` removes and returns characters from the start of the buffer up to and including the newline, simultaneously extracting the line and leaving any partial next line in place. Without `drain`, you'd need to track offsets manually or clone unnecessarily.
+
+---
+
+## `String::from_utf8_lossy` for Safe Byte Conversion
+**Date:** 2026-06-21
+**Context:** Converting reqwest byte chunks to strings in `ws_handler.rs`
+**Source:** Claude
+
+`String::from_utf8_lossy(&bytes)` converts a byte slice to a string without failing on invalid UTF-8 — any invalid sequences are replaced with the replacement character `\u{FFFD}` (`�`). This is preferable to `String::from_utf8` when the source is network data where perfect encoding cannot be guaranteed. The return type is `Cow<str>` (either borrowed or owned depending on whether replacement was needed), which coerces transparently to `&str` in most contexts.
 
 ---
 

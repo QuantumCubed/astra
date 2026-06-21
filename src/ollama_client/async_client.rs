@@ -25,13 +25,11 @@ pub async fn generate(req: GenRequest) -> Result<Value, reqwest::Error> {
     Ok(response)
 }
 
-pub async fn chat(req: ChatRequest) -> Result<Value, reqwest::Error> {
+pub async fn chat(req: ChatRequest) -> Result<reqwest::Response, reqwest::Error> {
     let response = reqwest::Client::new()
         .post(format!("{BASE_URL}/api/chat"))
         .json(&req)
         .send()
-        .await?
-        .json::<Value>()
         .await?;
 
     Ok(response)
