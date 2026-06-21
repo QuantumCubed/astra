@@ -1,5 +1,5 @@
 ---
-name: code-review
+name: rust-review
 description: Review Rust code for security issues, conventions, and correctness. Invoke with a file path, directory, or no argument for the entire project. Writes a dated report to the Obsidian vault.
 ---
 
