@@ -11,6 +11,24 @@ A running log of Rust concepts, patterns, and principles encountered during deve
 
 ---
 
+## The Agent Loop Pattern
+**Date:** 2026-06-22
+**Context:** Implementing tool call handling in `ws_handler.rs`
+**Source:** Claude
+
+The agent loop is a `loop {}` around the model call that continues as long as the model returns tool calls, and breaks when it returns a plain text response. Each iteration: call the model, parse the response, check for tool calls. If tool calls are present, dispatch them, add the results to conversation history, and `continue` — the next iteration calls the model again with the updated history. If no tool calls, stream the text response to the client and `break`. This pattern allows the model to chain multiple tool uses before giving a final answer without any special framework.
+
+---
+
+## `#[serde(skip_serializing_if = "Option::is_none")]`
+**Date:** 2026-06-22
+**Context:** Adding optional `tool_calls` field to `OllamaMessage` in `req_handler.rs`
+**Source:** Claude
+
+This attribute on a struct field tells serde to omit the field entirely from the serialized output when its value is `None`. Without it, an `Option` field serializes as `"field": null`, which can cause issues when the receiving API doesn't expect the key at all. Placed directly above the field it applies to (not on the struct). Requires `#[derive(Serialize)]` on the containing struct. The counterpart for deserialization is `#[serde(default)]`, which fills in `None` when the field is absent during deserialization.
+
+---
+
 ## Async Byte Stream Iteration with `StreamExt`
 **Date:** 2026-06-21
 **Context:** Implementing streaming Ollama responses in `ws_handler.rs`

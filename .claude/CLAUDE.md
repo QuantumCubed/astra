@@ -28,40 +28,69 @@ cargo clippy         # lint
 
 ## Architecture
 
-Astra is a Rust/Axum HTTP server that acts as a middleware between HTTP clients and a remote Ollama LLM, with a tool-dispatch layer that lets the model invoke local shell integrations.
+Astra is a Rust/Axum WebSocket server that acts as a middleware between WebSocket clients and a local Ollama LLM, with a tool-dispatch layer that lets the model invoke local shell integrations. All client communication is over a single `/ws` WebSocket endpoint.
 
 **Request flow:**
 
 ```
-HTTP client → Axum router (main.rs)
-                ├── GET  /ollama    → list models from Ollama
-                ├── POST /generate  → single-turn generation
-                └── POST /chat      → chat with tool-use loop
-                        ↓
-              ollama_client::async_client  (talks to Ollama REST API)
-                        ↓
-              If model returns tool_calls:
-                tools::dispatch::dispatch_tool(name, args)
-                        ↓
-                tools::implementations  (runs shell commands / scripts)
+WS client → handlers::ws::ws_handler
+                ↓
+          handle_socket (per-connection loop)
+                ↓
+          run_agent_loop
+                ↓
+          backend::ollama::client::chat  (streams from Ollama)
+                ↓
+          If model returns tool_calls:
+            tools::dispatch::dispatch_tool(name, args)
+                ↓
+            tools::implementations  (tokio::process::Command)
+                ↓
+          Loop back to Ollama with tool results
+                ↓
+          Stream text chunks to client as text_chunk frames
 ```
 
-**Key modules:**
+**Module structure:**
 
-- `src/state.rs` — `AppState` (shared via Axum `State`): holds the registered `Vec<Tool>`, cloned into every request.
-- `src/ollama_client/async_client.rs` — thin reqwest wrapper around Ollama's `/api/tags`, `/api/generate`, and `/api/chat`. The Ollama base URL is hardcoded as `const BASE_URL`.
-- `src/handlers/req_handler.rs` — Axum handlers. The `chat_model` handler checks the response for `message.tool_calls` and dispatches each one before returning.
-- `src/tools/registry.rs` — `Tool` / `ToolFunction` structs (serialized and sent to Ollama so the model knows what's available). `register_tools()` is the single place to add new tools.
-- `src/tools/dispatch.rs` — `dispatch_tool(name, args)` matches on tool name and calls the right implementation. Must be updated in sync with `register_tools()`.
-- `src/tools/implementations.rs` — async wrappers around `std::process::Command`. Shell scripts live in `src/integrations/script/`.
+```
+src/
+├── main.rs                      — server entry point, router
+├── backend.rs                   — module root
+├── backend/
+│   ├── state.rs                 — AppState (tools, system prompt, ollama url, reqwest client)
+│   ├── config.rs                — loads .astra/core/ + .astra/user/ markdown into system prompt
+│   ├── conversation.rs          — per-connection message history with sliding window
+│   ├── protocol.rs              — WebSocket message schema (Envelope, Message enum, payloads)
+│   ├── ollama.rs                — module root
+│   └── ollama/
+│       ├── client.rs            — reqwest wrapper around Ollama /api/chat
+│       └── types.rs             — OllamaMessage, ChatRequest, Role enum
+├── handlers.rs                  — module root
+├── handlers/
+│   └── ws.rs                    — WebSocket upgrade handler and agent loop
+├── tools.rs                     — module root
+└── tools/
+    ├── registry.rs              — Tool/ToolFunction structs, register_tools()
+    ├── dispatch.rs              — dispatch_tool(name, args) match router
+    └── implementations.rs       — async tool implementations (tokio::process::Command)
+```
 
 **Adding a new tool:**
-1. Add a shell script (if needed) under `src/integrations/script/`.
-2. Add an `async fn` in `src/tools/implementations.rs`.
-3. Register a `Tool::new(...)` entry in `src/tools/registry.rs` → `register_tools()`.
-4. Add a match arm in `src/tools/dispatch.rs` → `dispatch_tool`.
+1. Add an `async fn` in `src/tools/implementations.rs`.
+2. Register a `Tool::new(...)` entry in `src/tools/registry.rs` → `register_tools()`.
+3. Add a match arm in `src/tools/dispatch.rs` → `dispatch_tool`.
 
 **Configuration notes:**
-- Ollama server URL: hardcoded in `src/ollama_client/async_client.rs` (`BASE_URL`).
-- Model name: hardcoded in `src/handlers/req_handler.rs` (`"qwen3.5:9b"`).
+- Ollama server URL: read from `OLLAMA_URL` env var at startup (falls back to hardcoded LAN IP in `backend/state.rs`).
+- Model name: hardcoded in `handlers/ws.rs` (`"qwen3.5:9b"`).
+- System prompt: assembled at startup from `.astra/core/*.md` then `.astra/user/*.md`.
 - Server listens on `0.0.0.0:3000`.
+
+## Conventions
+
+- **Rust edition:** 2024. Follow modern Rust 2018+ idioms throughout.
+- **Module files:** use the named-file convention — `foo.rs` alongside `foo/` for submodules. Never use `mod.rs` (that is the old Rust 2015 style).
+- **Naming:** `snake_case` for functions/variables, `PascalCase` for types, `SCREAMING_SNAKE_CASE` for constants.
+- **Async:** use `tokio::process::Command` (not `std::process::Command`) inside async functions.
+- **Error handling:** prefer `?` for propagation; use `expect("reason")` only at startup where failure should be fatal; avoid bare `unwrap()` in production paths.

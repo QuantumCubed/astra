@@ -1,16 +1,14 @@
-use std::process::ExitStatus;
 use crate::tools::implementations;
 use serde_json::Value;
 use serde::Serialize;
 
 #[derive(Serialize)]
 pub enum ToolResult {
-    Json(Value),
     Exit { success: bool, code: Option<i32> },
     Error(String),
 }
 
-pub async fn dispatch_tool(tool_name: &str, args: Value) -> ToolResult {
+pub async fn dispatch_tool(tool_name: &str, _args: Value) -> ToolResult {
     match tool_name {
         "echo_hello_world" => {
             match implementations::echo_hello_world().await {
@@ -20,7 +18,7 @@ pub async fn dispatch_tool(tool_name: &str, args: Value) -> ToolResult {
                 },
                 Err(e) => ToolResult::Error(e.to_string()),
             }
-        },
+        }
         "list_contents" => {
             match implementations::list_contents().await {
                 Ok(status) => ToolResult::Exit {

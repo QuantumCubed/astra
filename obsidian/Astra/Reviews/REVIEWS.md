@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-21
 ---
 
 [[ASTRA|← Home]]
@@ -11,4 +11,4 @@ Dated code review reports generated during development. Invoke `/code-review` to
 
 ---
 
-_No reviews yet._
+- [[2026-06-21-project]] — project (full src/), 16 findings

@@ -18,15 +18,16 @@ WebSocket client
     └── Axum router (src/main.rs)
             └── GET /ws → WebSocket upgrade
                     ↓
-            ws_handler::handle_socket (per-connection async loop)
-                    ├── Parses incoming Envelope (src/protocol.rs)
-                    ├── Maintains conversation via Conversation (src/conversation.rs)
+            handlers::ws::handle_socket (per-connection async loop)
+                    ├── Parses incoming Envelope (backend/protocol.rs)
+                    ├── Maintains conversation via Conversation (backend/conversation.rs)
                     │       └── Sliding window token management
-                    └── ollama_client::async_client (HTTP to Ollama REST API)
-                            ↓
-                    model response:
-                      tool_calls? → dispatch → implementations → continue loop
-                      text?       → stream TextChunk envelopes back to client
+                    └── run_agent_loop
+                            └── backend::ollama::client (HTTP to Ollama /api/chat)
+                                    ↓
+                            model response:
+                              tool_calls? → tools::dispatch → tools::implementations → continue loop
+                              text?       → stream TextChunk envelopes back to client
 ```
 
 ## Modules
@@ -34,15 +35,16 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init |
-| `src/state.rs` | `AppState` — shared state holding registered tools |
-| `src/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
-| `src/handlers/ws_handler.rs` | WebSocket connection handler, per-connection message loop |
-| `src/conversation.rs` | Conversation state — message history, sliding window enforcement |
-| `src/ollama_client/async_client.rs` | HTTP client wrapper for Ollama API |
-| `src/handlers/req_handler.rs` | Legacy HTTP handlers (to be retired); owns `OllamaMessage`, `ChatRequest` types until refactored |
-| `src/tools/registry.rs` | Tool definitions, `register_tools()` |
+| `src/backend/state.rs` | `AppState` — tools, system prompt, ollama URL, shared reqwest client |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` |
+| `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
+| `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
+| `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
+| `src/backend/ollama/types.rs` | `OllamaMessage`, `ChatRequest`, `Role` enum |
+| `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop |
+| `src/tools/registry.rs` | `Tool`/`ToolFunction` structs, `register_tools()` |
 | `src/tools/dispatch.rs` | Routes tool call by name to implementation |
-| `src/tools/implementations.rs` | Concrete tool logic (shell commands) |
+| `src/tools/implementations.rs` | Async tool logic (`tokio::process::Command`) |
 | `src/integrations/script/` | Shell scripts invoked by tool implementations |
 
 ## Conversation State
@@ -58,18 +60,19 @@ Current storage: **in-memory per session** (lost on server restart). Persistence
 Behavioral config is split into two layers, assembled at startup into a single system prompt injected into every Ollama request:
 
 ```
-config/
+.astra/
+  astra.conf            # runtime config (OLLAMA_IP, etc.)
   core/
-    identity.md       # what Astra is, what it can do
-    tools.md          # rules around tool use
-    behavior.md       # hard constraints
+    identity.md         # what Astra is, what it can do
+    tools.md            # rules around tool use
+    behavior.md         # hard constraints
   user/
-    personality.md    # name, tone, persona
-    collaboration.md  # how it works with the user
-    coding-style.md   # preferences when writing code
+    personality.md      # name, tone, persona
+    collaboration.md    # how it works with the user
+    coding-style.md     # preferences when writing code
 ```
 
-Core is loaded first, user config appended after. Core uses hard constraint language; user config covers softer preferences. User files can be absent without error. The combined token count determines the sliding window size N.
+Core is loaded first, user config appended after. Core uses hard constraint language; user config covers softer preferences. User files can be absent without error. The combined token count determines the sliding window size N. `astra.conf` is a `KEY=VALUE` file parsed at startup for runtime settings like the Ollama server URL.
 
 Hardware/runtime tuning (`num_ctx`, GPU offload, thread count) is managed via an Ollama Modelfile on the host machine and is outside Astra's scope.
 

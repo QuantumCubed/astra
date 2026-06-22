@@ -27,6 +27,7 @@ Read every file in scope before proceeding.
 - Idiomatic error handling: prefer `?` over `unwrap()`/`expect()` in functions that return `Result`
 - Unnecessary `.clone()` calls where a reference would suffice
 - Unused imports or dead code
+- Module files: flag any `mod.rs` file — the project uses the Rust 2018+ convention of named module files (`foo.rs` alongside `foo/`); `mod.rs` is the old Rust 2015 style and should not be introduced
 
 ### Async Correctness
 - Blocking calls inside async functions (e.g. `std::thread::sleep`, synchronous file I/O, `std::process::Command` in an async context without `spawn_blocking`)

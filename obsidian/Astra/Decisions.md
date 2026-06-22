@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-20
+updated: 2026-06-21
 ---
 
 # Decisions
@@ -82,6 +82,38 @@ A log of significant technical and architectural decisions, including the reason
 **Decision:** System prompt and behavioral rules (persona, capabilities, tone) are owned by Astra and injected into every request. Hardware/runtime tuning (`num_ctx`, GPU layers, thread count) belongs in an Ollama Modelfile on the host machine.
 
 **Reasoning:** Behavioral config should be version-controlled alongside the code that uses it and changeable without touching the Ollama machine. Runtime tuning is machine-specific and not meaningful to track in the Astra repo. System prompt size is also a per-token tax on every request, so config files should be kept concise.
+
+---
+
+## 2026-06-21 — Ollama URL read from `.astra/astra.conf`
+
+**Decision:** The Ollama server URL is no longer hardcoded. It is read at startup from `.astra/astra.conf` under the key `OLLAMA_IP`. The server fails fast with a clear error if the key is missing.
+
+**Reasoning:** The hardcoded LAN IP only worked on one machine. Moving it to a config file in `.astra/` keeps it alongside the other runtime config (system prompt, persona) without introducing environment variable complexity. `astra.conf` uses a simple `KEY=VALUE` format parsed by `backend::config::load_ollama_url()`.
+
+---
+
+## 2026-06-21 — `reqwest::Client` stored in `AppState`, created once at startup
+
+**Decision:** A single `reqwest::Client` is created in `AppState::new()` and reused across all Ollama requests for the lifetime of the process.
+
+**Reasoning:** `reqwest::Client` manages an internal connection pool. Creating a new client per request throws away that pool, adding TCP handshake overhead on every call. Storing it in `AppState` is the idiomatic Axum pattern for shared, cloneable resources.
+
+---
+
+## 2026-06-21 — Module restructured into `backend/`, `handlers/`, `tools/`
+
+**Decision:** Source files are organised into three top-level modules: `backend/` (state, config, conversation, protocol, ollama client and types), `handlers/` (WebSocket handler), and `tools/` (registry, dispatch, implementations).
+
+**Reasoning:** The flat `src/` layout became unwieldy as Phase 1 added files. `backend/` groups foundational app wiring and the Ollama API layer. Ollama-specific code (`client.rs`, `types.rs`) lives in `backend/ollama/` to distinguish it from general concerns. `handlers/` and `tools/` are natural domain boundaries that will each grow independently in later phases.
+
+---
+
+## 2026-06-21 — Named module files over `mod.rs` (Rust 2018+ convention)
+
+**Decision:** All modules use the Rust 2018+ named-file convention: `foo.rs` as the module root alongside a `foo/` directory for submodules. `mod.rs` is not used anywhere in the project.
+
+**Reasoning:** `mod.rs` was the Rust 2015 style. The 2018 convention is strictly better for navigation — module files have unique, meaningful names rather than a sea of `mod.rs` tabs. This is enforced by the rust-review skill and documented in `CLAUDE.md`.
 
 ---
 

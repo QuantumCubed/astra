@@ -9,28 +9,14 @@ updated: 2026-06-21
 
 ## In Progress
 
-### Phase 1 — WebSocket Foundation
-
-**Step 1 — Basic text flow**
-- [x] Define WebSocket message schema (Envelope + Message enum in `src/protocol.rs`)
-- [x] Replace HTTP routes with a `/ws` WebSocket handler in Axum (`src/handlers/ws_handler.rs`)
-- [ ] Complete `src/conversation.rs` — `add_user_turn`, `add_assistant_turn`, `messages()` 
-- [ ] Wire Ollama call into `ws_handler` — parse TextMessage, call chat, send TextChunk response
-- [ ] Stateful multi-turn conversation scoped to the WebSocket connection
-- [ ] Streaming LLM responses token-by-token; branch on `content` vs `tool_calls` in first chunk
+_Phase 2 — Tool layer improvements._
 
 ## Backlog
 
-**Step 2 — System configuration**
-- [ ] Create `config/core/` and `config/user/` directory structure with starter files
-- [ ] Load and assemble config files into a single system prompt at startup
-- [ ] Compute sliding window size N dynamically from context window minus system prompt size
-- [ ] Enforce sliding window on messages array before every Ollama request
-
 ### Phase 2 — Tool Layer
 
+- [ ] Fix tool implementations to capture stdout (currently return `ExitStatus` only — tool results sent to model are meaningless)
 - [ ] Refactor tool implementations into per-tool modules
-- [ ] Move `OllamaMessage` and `ChatRequest` types out of `req_handler.rs` into `ollama_client`
 - [ ] Structured tool error handling (tool failures must not crash the request)
 - [ ] Define and implement first real tool
 
@@ -40,7 +26,21 @@ updated: 2026-06-21
 
 ## Done
 
-- [x] Basic Axum server with `/ollama`, `/generate`, `/chat` routes
+- [x] Phase 2 cleanup — dead code removed (`req_handler.rs` deleted, `OllamaMessage`/`ChatRequest` moved to `backend/ollama/types.rs`)
+- [x] Codebase restructured into `backend/`, `handlers/`, `tools/` modules
+- [x] Ollama URL moved from hardcoded constant to `.astra/astra.conf`
+- [x] `reqwest::Client` created once in `AppState`, reused across requests
+- [x] `role: String` replaced with typed `Role` enum in `OllamaMessage`
+- [x] Async correctness — `std::process::Command` replaced with `tokio::process::Command`
+- [x] Hardcoded absolute script path fixed to relative path
+- [x] Modern Rust 2018+ module convention enforced (named files, no `mod.rs`)
+- [x] WebSocket message schema (`src/protocol.rs` — Envelope, Message enum, payload structs)
+- [x] WebSocket route and handler (`src/handlers/ws_handler.rs`)
+- [x] Conversation state with sliding window (`src/conversation.rs`)
+- [x] System prompt config — two-layer core/user markdown files, loaded at startup via `src/config.rs`
+- [x] Streaming Ollama responses token-by-token over WebSocket
+- [x] Tool call detection and agent loop (detect tool_calls in stream, dispatch, re-enter loop)
+- [x] Basic Axum server with `/ollama`, `/generate`, `/chat` routes (retired)
 - [x] Ollama client for `list_models`, `generate`, `chat`
 - [x] Tool registry, dispatch, and implementation layer
 - [x] Claude Code configured (permissions, cargo check hook, plugins)

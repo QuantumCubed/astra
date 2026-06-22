@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -29,33 +28,18 @@ impl Tool {
     }
 }
 
-#[derive(Serialize)]
-pub struct NoArgs {
-    #[serde(rename = "type")]
-    pub type_: &'static str,
-    pub properties: serde_json::Value,
-}
-
-impl NoArgs {
-    pub fn new() -> Self {
-        Self {
-            type_: "object",
-            properties: serde_json::json!({}),
-        }
-    }
-}
-
 pub fn register_tools() -> Vec<Tool> {
+    let no_args = serde_json::json!({ "type": "object", "properties": {} });
     vec![
         Tool::new(
             "echo_hello_world",
             "calls a .sh script to echo hello world",
-            serde_json::to_value(NoArgs::new()).unwrap(),
+            no_args.clone(),
         ),
         Tool::new(
             "list_contents",
             "lists the contents of the pwd",
-            serde_json::to_value(NoArgs::new()).unwrap(),
-        )
+            no_args,
+        ),
     ]
 }

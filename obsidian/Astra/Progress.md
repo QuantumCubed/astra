@@ -9,6 +9,31 @@ updated: 2026-06-21
 
 ---
 
+## 2026-06-21 — Phase 2 Cleanup and Restructure
+
+- Full code review (`/rust-review`) — 16 findings across critical, warnings, suggestions; all resolved
+- Deleted dead HTTP handler layer (`req_handler.rs`); moved `OllamaMessage`, `ChatRequest`, `Role` enum into `backend/ollama/types.rs`
+- Fixed async correctness: `std::process::Command` → `tokio::process::Command` in tool implementations
+- Fixed hardcoded absolute macOS script path to relative path
+- Added `reqwest::Client` to `AppState` (created once, reused); `ollama_url` now read from `.astra/astra.conf` via `load_ollama_url()`
+- Restructured `src/` into `backend/` (state, config, conversation, protocol, ollama/), `handlers/`, `tools/`; migrated to Rust 2018+ named module file convention throughout
+- Updated `CLAUDE.md` with accurate Architecture section and new Conventions section; rust-review skill updated to flag `mod.rs`
+
+---
+
+## 2026-06-22 — Phase 1 Complete
+
+- Completed `src/conversation.rs`: all turn methods, sliding window, system prompt at index 0
+- Created `src/config.rs`: loads and assembles `config/core/` + `config/user/` markdown files into system prompt at startup
+- Populated all six config files (core: identity, behavior, tools; user: personality, collaboration, coding-style)
+- Wired system prompt into `AppState` and `Conversation::new`
+- Implemented streaming in `ws_handler`: NDJSON line buffering, token-by-token `text_chunk` delivery
+- Implemented tool call agent loop: detects `tool_calls` in stream, dispatches via `dispatch_tool`, adds results to conversation history, re-enters Ollama call loop; breaks on text response
+- Extended `OllamaMessage` with optional `tool_calls` field (`#[serde(skip_serializing_if = "Option::is_none")]`)
+- Known limitation: tool implementations return `ExitStatus` not stdout — tool results sent to model are not useful yet (Phase 2 fix)
+
+---
+
 ## 2026-06-21 — Phase 1 WebSocket Foundation (in progress)
 
 - Designed and logged all major architectural decisions: Ollama statelessness, Astra owning conversation state, sliding window context management, two-layer config system (core/user), streaming routing strategy, WebSocket message schema

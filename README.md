@@ -10,7 +10,42 @@ Astra bridges WebSocket clients to a local Ollama LLM. It maintains per-connecti
 
 ## Status
 
-Phase 1 (WebSocket Foundation) is in progress. The WebSocket transport layer, message protocol, conversation state management, and config loading are implemented. Streaming response routing and the full tool loop are being built.
+Phase 1 (WebSocket Foundation) is complete. Phase 2 (Tool Layer) is in progress.
+
+## Setup
+
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (edition 2024)
+- A running [Ollama](https://ollama.com/) instance accessible from the host machine
+
+### Configuration
+
+All runtime config lives in `.astra/` at the project root.
+
+**`.astra/astra.conf`** — required. Create this file before running the server:
+
+```
+OLLAMA_IP=http://<your-ollama-host>:11434
+```
+
+The server will fail at startup with a clear error if this file or key is missing.
+
+**`.astra/core/`** — hard behavioral constraints injected into every Ollama request (identity, tool rules, behavior). Loaded first.
+
+**`.astra/user/`** — soft preferences (persona, tone, collaboration style). Appended after core. Files can be absent without error.
+
+The combined token count of all config files determines the sliding context window size: `max_context_tokens - system_prompt_tokens - response_buffer`.
+
+Hardware/runtime tuning (`num_ctx`, GPU offload, thread count) belongs in an Ollama Modelfile on the host machine — not in this repo.
+
+### Run
+
+```bash
+cargo run     # start server on port 3000
+```
+
+The server listens on `0.0.0.0:3000`.
 
 ## Architecture
 
@@ -19,15 +54,16 @@ WebSocket client
     └── Axum router (src/main.rs)
             └── GET /ws → WebSocket upgrade
                     ↓
-            ws_handler::handle_socket (per-connection async loop)
-                    ├── Parses incoming Envelope (src/protocol.rs)
-                    ├── Maintains conversation via Conversation (src/conversation.rs)
+            handlers::ws::handle_socket (per-connection async loop)
+                    ├── Parses incoming Envelope (backend/protocol.rs)
+                    ├── Maintains conversation via Conversation (backend/conversation.rs)
                     │       └── Sliding window token management
-                    └── ollama_client::async_client (HTTP to Ollama REST API)
-                            ↓
-                    model response:
-                      tool_calls? → dispatch → implementations → continue loop
-                      text?       → stream TextChunk envelopes back to client
+                    └── run_agent_loop
+                            └── backend::ollama::client (HTTP to Ollama /api/chat)
+                                    ↓
+                            model response:
+                              tool_calls? → dispatch → implementations → continue loop
+                              text?       → stream TextChunk envelopes back to client
 ```
 
 ### Key modules
@@ -35,16 +71,16 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, `AppState` init |
-| `src/state.rs` | `AppState` — shared state holding registered tools |
-| `src/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
-| `src/handlers/ws_handler.rs` | WebSocket connection handler, per-connection message loop |
-| `src/conversation.rs` | Conversation history, token estimation, sliding window enforcement |
-| `src/config.rs` | Loads and assembles `config/core/` and `config/user/` into a system prompt |
-| `src/ollama_client/async_client.rs` | HTTP client wrapper for the Ollama REST API |
+| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, shared reqwest client |
+| `src/backend/config.rs` | Loads `.astra/core/` and `.astra/user/` into system prompt; parses `astra.conf` |
+| `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
+| `src/backend/conversation.rs` | Conversation history, token estimation, sliding window enforcement |
+| `src/backend/ollama/client.rs` | reqwest wrapper for the Ollama `/api/chat` API |
+| `src/backend/ollama/types.rs` | `OllamaMessage`, `ChatRequest`, `Role` enum |
+| `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop |
 | `src/tools/registry.rs` | Tool definitions, `register_tools()` |
 | `src/tools/dispatch.rs` | Routes tool calls by name to implementations |
-| `src/tools/implementations.rs` | Concrete tool logic (shell commands) |
-| `src/integrations/script/` | Shell scripts invoked by tool implementations |
+| `src/tools/implementations.rs` | Concrete tool logic (`tokio::process::Command`) |
 
 ## Message Protocol
 
@@ -72,26 +108,6 @@ All messages share a common envelope:
 
 Audio is not a JSON message type — it will be sent as binary WebSocket frames (Phase 3).
 
-## Configuration
-
-Behavioral config lives in `config/` alongside the code and is injected as a system prompt into every Ollama request:
-
-```
-config/
-  core/
-    identity.md      # what Astra is, what it can do
-    tools.md         # rules around tool use
-    behavior.md      # hard constraints
-  user/
-    personality.md   # name, tone, persona
-    collaboration.md # how it works with the user
-    coding-style.md  # preferences when writing code
-```
-
-Core is loaded first; user config is appended after. User files can be absent without error. The combined token count determines the sliding window size: `max_context_tokens - system_prompt_tokens - response_buffer`.
-
-Hardware/runtime tuning (`num_ctx`, GPU offload, thread count) belongs in an Ollama Modelfile on the host machine — not in this repo.
-
 ## Commands
 
 ```bash
@@ -102,21 +118,18 @@ cargo check   # fast type-check without linking
 cargo clippy  # lint
 ```
 
-The server listens on `0.0.0.0:3000`. The Ollama URL and model name are currently hardcoded constants in `src/ollama_client/async_client.rs` and `src/handlers/req_handler.rs`.
-
 ## Adding a tool
 
-1. Add a shell script (if needed) under `src/integrations/script/`.
-2. Add an `async fn` in `src/tools/implementations.rs`.
-3. Register a `Tool::new(...)` entry in `src/tools/registry.rs` → `register_tools()`.
-4. Add a match arm in `src/tools/dispatch.rs` → `dispatch_tool`.
+1. Add an `async fn` in `src/tools/implementations.rs`.
+2. Register a `Tool::new(...)` entry in `src/tools/registry.rs` → `register_tools()`.
+3. Add a match arm in `src/tools/dispatch.rs` → `dispatch_tool`.
 
 ## Roadmap
 
 | Phase | Goal | Status |
 |---|---|---|
-| 1 | WebSocket Foundation — transport, protocol, conversation state, config | In progress |
-| 2 | Tool Layer — real tools, structured error handling, per-tool modules | Pending |
+| 1 | WebSocket Foundation — transport, protocol, conversation state, config | Complete |
+| 2 | Tool Layer — real tools, structured error handling, per-tool modules | In progress |
 | 3 | Voice Interface — STT/TTS, audio frames, VAD, interruption handling | Pending |
 | 4 | Web Client — browser-based text/voice UI | Pending |
 | 5 | Agents & Expansion — multi-step agents, smart home, mobile/desktop clients | Pending |

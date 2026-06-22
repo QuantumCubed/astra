@@ -98,9 +98,37 @@
               "icon": "lucide-file",
               "title": "concepts"
             }
+          },
+          {
+            "id": "22b888b27efc911d",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Progress.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Progress"
+            }
+          },
+          {
+            "id": "f83d2e7d592f785d",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Reviews/2026-06-21-project.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "2026-06-21-project"
+            }
           }
         ],
-        "currentTab": 4
+        "currentTab": 6
       }
     ],
     "direction": "vertical"
@@ -173,7 +201,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Learning/concepts.md",
+                "file": "Reviews/2026-06-21-project.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -183,7 +211,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for concepts"
+              "title": "Backlinks for 2026-06-21-project"
             }
           },
           {
@@ -192,12 +220,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Learning/concepts.md",
+                "file": "Reviews/2026-06-21-project.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from concepts"
+              "title": "Outgoing links from 2026-06-21-project"
             }
           },
           {
@@ -235,13 +263,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "Learning/concepts.md",
+                "file": "Reviews/2026-06-21-project.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of concepts"
+              "title": "Outline of 2026-06-21-project"
             }
           }
         ]
@@ -262,25 +290,26 @@
       "bases:Create new base": false
     }
   },
-  "active": "faf1a08f3ed543f0",
+  "active": "f83d2e7d592f785d",
   "lastOpenFiles": [
-    "Learning/concepts.md.tmp.385492.2c33f10dc9c1",
-    "Learning/concepts.md.tmp.385492.028391a38a04",
-    "Learning/LEARNING.md",
+    "Progress.md.tmp.428660.0946efa09fa0",
+    "Progress.md.tmp.428660.3f6ccd481b2c",
+    "Todos.md.tmp.428660.960db68f44d8",
+    "Todos.md.tmp.428660.78c87ef6db61",
+    "Todos.md.tmp.428660.449699fb8564",
+    "Todos.md.tmp.428660.2d96120b60ea",
+    "Decisions.md.tmp.428660.9361109423b0",
+    "Decisions.md.tmp.428660.271997bb8159",
+    "Architecture.md.tmp.428660.4d101af7143a",
+    "Architecture.md.tmp.428660.0e15bb99c559",
+    "Architecture.md.tmp.428660.24d92293c4c1",
     "Roadmap.md",
-    "Learning/concepts.md.tmp.385492.0aa30928d1da",
-    "Learning/concepts.md.tmp.385492.6828659d93e0",
-    "Learning/concepts.md.tmp.385492.6b6d75254dbd",
-    "Learning/concepts.md.tmp.385492.d332d0884de9",
-    "Progress.md.tmp.385492.51d21424a5e6",
-    "Progress.md.tmp.385492.4bb809faf69a",
-    "Todos.md.tmp.385492.15387ff5063f",
-    "Architecture.md.tmp.385492.77e39a6e6989",
-    "ASTRA.md.tmp.385492.6a01b938f602",
-    "Decisions.md",
+    "Reviews/2026-06-21-project.md",
     "Progress.md",
-    "Architecture.md",
     "Learning/concepts.md",
+    "Learning/LEARNING.md",
+    "Decisions.md",
+    "Architecture.md",
     "Reviews/REVIEWS.md",
     "Todos.md",
     "ASTRA.md",
