@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 
 # Concepts
@@ -8,6 +8,15 @@ updated: 2026-06-21
 [[LEARNING]]
 
 A running log of Rust concepts, patterns, and principles encountered during development of Astra. Entries marked **Claude** were explained during a session. Entries marked **Self-discovered** were figured out independently.
+
+---
+
+## `#[cfg]` for Compile-Time Platform Detection
+**Date:** 2026-06-22
+**Context:** Making tool implementations work on both Windows and Unix when fixing the `echo_hello_world` tool
+**Source:** Claude
+
+`#[cfg(target_os = "windows")]` is a compile-time attribute that tells the compiler to include or exclude a block of code depending on the target platform. Unlike a runtime `if std::env::consts::OS == "windows"` check, `#[cfg]` blocks that don't match the current target are completely absent from the compiled binary — no dead code, no runtime branch, and each platform's code is validated independently by the compiler. The counterpart `#[cfg(not(target_os = "windows"))]` covers all other platforms. This is the correct Rust tool whenever behavior genuinely differs by platform, especially when the two paths use platform-specific APIs that wouldn't compile on the other OS.
 
 ---
 
