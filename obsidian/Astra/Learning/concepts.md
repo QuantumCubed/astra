@@ -240,3 +240,13 @@ When you're already inside a Tokio async context (i.e., inside `#[tokio::main]`)
 `tokio::task::spawn_blocking` requires its closure to be `'static` — meaning it cannot hold any references that borrow from the current stack frame, because the closure will run on a separate thread that may outlive the current one. A `&str` is a borrowed reference with a lifetime tied to its source; it is not `'static` unless the source is a string literal baked into the binary. The idiomatic fix is to call `.to_string()` on the `&str` before constructing the closure, converting it into an owned `String` that the closure can take by value (`move`). Inside the closure, you can then re-borrow the `String` as `&str` safely, because the `String` is owned by the closure itself.
 
 ---
+
+## Async Initialization Propagates Up the Call Stack
+
+**Date:** 2026-06-23
+**Context:** Switching TTS to `kokoro-tiny`, whose `TtsEngine::new()` is an `async fn`, requiring `AppState::new()` to also become `async`
+**Source:** Claude
+
+In Rust, async is contagious: if a function you call is `async`, you must either `.await` it (which makes your function `async` too) or spawn it as a separate task. You cannot call an async function synchronously. This means initialization code that was previously `fn new() -> Self` must become `async fn new() -> Self` the moment any step in it — loading a model, opening a connection, resolving a hostname — becomes async. The practical implication is that `main.rs` (or wherever the struct is instantiated) must also be in an async context, which `#[tokio::main]` provides. Contrast this with CPU-bound blocking init (like whisper's model load), which stays synchronous and gets moved to `spawn_blocking` to avoid blocking the async executor.
+
+---

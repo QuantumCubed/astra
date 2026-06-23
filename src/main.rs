@@ -9,9 +9,7 @@ use crate::backend::state::AppState;
 
 #[tokio::main]
 async fn main() {
-    let state = tokio::task::spawn_blocking(AppState::new)
-        .await
-        .expect("failed to initialize AppState");
+    let state = AppState::new().await;
 
     let app = Router::new()
         .route("/ws", get(ws_handler))

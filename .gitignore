@@ -1,4 +1,5 @@
 /target
 settings.local.json
 astra.conf
-.astra/models
+.astra/models/stt
+.astra/models/tts

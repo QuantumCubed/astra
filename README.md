@@ -10,7 +10,7 @@ Astra bridges WebSocket clients to a local Ollama LLM. It maintains per-connecti
 
 ## Status
 
-Phase 1 (WebSocket Foundation) is complete. Phase 2 (Tool Layer) is in progress.
+Phase 1 (WebSocket Foundation) is complete. Phase 2 (Voice Interface) is in progress — audio pipeline is implemented; pending model downloads and end-to-end test.
 
 ## Setup
 
@@ -18,7 +18,8 @@ Phase 1 (WebSocket Foundation) is complete. Phase 2 (Tool Layer) is in progress.
 
 - [Rust](https://rustup.rs/) (edition 2024)
 - A running [Ollama](https://ollama.com/) instance accessible from the host machine
-- **Windows only:** [LLVM](https://github.com/llvm/llvm-project/releases) (required by `whisper-rs` bindgen at build time). Install via `winget install LLVM.LLVM`.
+- **Linux / WSL2 required** for builds that include `whisper-rs` and `kokoro-tiny`. The two crates have a C runtime conflict on Windows MSVC (LNK2038 `/MD` vs `/MT`) that has no linker workaround. All audio-enabled builds run on Linux or WSL2 (Ubuntu). CUDA works via WSL2's GPU passthrough.
+- **Linux build deps:** `sudo apt install -y libasound2-dev` (ALSA, pulled in by kokoro-tiny).
 
 ### Configuration
 
@@ -29,9 +30,10 @@ All runtime config lives in `.astra/` at the project root.
 ```
 OLLAMA_ENDPOINT=http://<your-ollama-host>:11434
 WHISPER_MODEL=.astra/models/stt/ggml-base.en.bin
+KOKORO_VOICE=af_heart
 ```
 
-The server will fail at startup with a clear error if either key is missing. Whisper model files (`.ggml` format) can be downloaded from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp). `ggml-base.en.bin` is a good starting point (~142MB).
+The server will fail at startup with a clear error if `OLLAMA_ENDPOINT` or `WHISPER_MODEL` are missing. `KOKORO_VOICE` defaults to `af_heart` if absent. Whisper model files (`.ggml` format) can be downloaded from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp). `ggml-base.en.bin` is a good starting point (~142MB). Kokoro TTS models are auto-downloaded to `~/.cache/k/` on first run — no manual download needed.
 
 **`.astra/core/`** — hard behavioral constraints injected into every Ollama request (identity, tool rules, behavior). Loaded first.
 
@@ -106,7 +108,7 @@ All messages share a common envelope:
 | `tool_result` | Server → Client | `{ "name": "...", "result": "..." }` |
 | `audio_end` | Client → Server | `{}` — signals end of mic audio (push-to-talk) |
 | `transcript` | Server → Client | `{ "text": "..." }` — STT result from Whisper |
-| `tts_end` | Server → Client | `{}` — signals end of TTS audio stream |
+| `tts_end` | Server → Client | `{ "sample_rate": 24000, "channels": 1, "format": "f32le" }` — signals end of TTS audio stream |
 | `error` | Server → Client | `{ "message": "...", "code": "..." }` |
 
 `done: true` on a `text_chunk` means the response for that `request_id` is complete. The WebSocket connection stays open.

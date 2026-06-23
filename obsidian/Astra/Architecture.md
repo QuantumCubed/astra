@@ -35,15 +35,15 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init |
-| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, shared reqwest client, `Arc<WhisperContext>`, `Arc<dyn TtsModel>`, `tts_sample_rate`, `tts_voice` |
-| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys (`OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `KOKORO_MODEL`, `KOKORO_VOICE`) |
+| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, shared reqwest client, `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>`, `tts_voice` |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys (`OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `KOKORO_VOICE`) |
 | `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
 | `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
 | `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
 | `src/backend/ollama/types.rs` | `OllamaMessage`, `ChatRequest`, `Role` enum |
 | `src/backend/audio.rs` | Audio module root |
 | `src/backend/audio/stt.rs` | STT — `load_whisper_ctx` + `transcribe` (whisper-rs 0.16.0, `spawn_blocking`) |
-| `src/backend/audio/tts.rs` | TTS — `load_tts_model` + `synthesize` (any-tts/Kokoro, `spawn_blocking`) |
+| `src/backend/audio/tts.rs` | TTS — `load_tts_engine` + `synthesize` (kokoro-tiny, `spawn_blocking`); `strip_markdown` pre-processes LLM output before phonemization |
 | `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop, audio buffer, full voice pipeline |
 | `src/tools/registry.rs` | `Tool`/`ToolFunction` structs, `register_tools()` |
 | `src/tools/dispatch.rs` | Routes tool call by name to implementation |
@@ -113,7 +113,7 @@ binary WS frames (PCM chunks)
 ```
 
 **STT:** `whisper-rs` v0.16.0 — whisper.cpp via C FFI. Requires LLVM/libclang on Windows for the bindgen build step.
-**TTS:** `any-tts` v0.1.1 — Kokoro 82M via Candle (pure Rust, no system deps). Returns `Vec<f32>` PCM at 24kHz.
+**TTS:** `kokoro-tiny` v0.1.0 — Kokoro via ONNX Runtime (`ort` rc.12). espeak-ng phonemizer bundled statically via `espeak-rs-sys` (no system install needed). Returns `Vec<f32>` PCM at 24kHz. Models auto-downloaded to `~/.cache/k/` on first run. `TtsEngine` is wrapped in `Arc<Mutex<_>>` because `synthesize` takes `&mut self`.
 
 ## Current Tools
 

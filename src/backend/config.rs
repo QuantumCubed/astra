@@ -51,19 +51,6 @@ pub fn load_whisper_model_path() -> Result<String, std::io::Error> {
     ))
 }
 
-pub fn load_tts_model_path() -> Result<String, std::io::Error> {
-    let content = std::fs::read_to_string(".astra/astra.conf")?;
-    for line in content.lines() {
-        if let Some(value) = line.strip_prefix("KOKORO_MODEL=") {
-            return Ok(value.trim().to_string());
-        }
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "KOKORO_MODEL key not found in .astra/astra.conf",
-    ))
-}
-
 pub fn load_tts_voice() -> Result<String, std::io::Error> {
     let content = std::fs::read_to_string(".astra/astra.conf")?;
     for line in content.lines() {
@@ -71,5 +58,8 @@ pub fn load_tts_voice() -> Result<String, std::io::Error> {
             return Ok(value.trim().to_string());
         }
     }
-    return Ok("af_heart".to_string())
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "KOKORO_VOICE key not found in .astra/astra.conf",
+    ))
 }

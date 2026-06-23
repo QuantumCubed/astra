@@ -9,7 +9,7 @@ updated: 2026-06-23
 
 ## In Progress
 
-_Phase 2 — voice pipeline code complete; pending end-to-end test with a real client._
+_Nothing active._
 
 ## Backlog
 
@@ -27,8 +27,9 @@ _Phase 2 — voice pipeline code complete; pending end-to-end test with a real c
 
 ## Done
 
+- [x] TTS library finalised: `kokoro-tiny v0.1.0` — `tts.rs`, `state.rs`, `config.rs`, `Cargo.toml`, `astra.conf` all updated; kokoroxide and tts-rs abandoned (see Decisions)
+- [x] `AppState::new()` made async; `spawn_blocking` wrapper in `main.rs` removed — kokoro-tiny uses native async, no nested runtime issue
 - [x] WSL2 (Ubuntu) established as development environment for Linux/CUDA builds — native Windows MSVC is blocked by an irresolvable CRT conflict (LNK2038)
-- [x] `AppState::new()` wrapped in `spawn_blocking` in `main.rs` — avoids Tokio runtime panic from any-tts's internal runtime
 - [x] `voice_response: bool` added to `TextMessagePayload` — text messages can optionally request TTS output
 - [x] `TtsEnd` upgraded to `TtsEnd(TtsEndPayload)` with `sample_rate`, `channels`, `format` — client can configure audio playback correctly
 - [x] `KOKORO_VOICE` key added to `astra.conf`; `load_tts_voice()` added to `config.rs`; `tts_voice: String` added to `AppState`

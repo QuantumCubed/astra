@@ -127,9 +127,9 @@ A log of significant technical and architectural decisions, including the reason
 
 ## 2026-06-22 — Server-side audio pipeline with in-process Rust libraries
 
-**Decision:** STT and TTS both run server-side, in-process within the Astra Rust binary. STT uses `whisper-rs` (whisper.cpp via C FFI, v0.16.0). TTS uses `any-tts` with the Kokoro backend (Candle-based, pure Rust, v0.1.1).
+**Decision:** STT and TTS both run server-side, in-process within the Astra Rust binary. STT uses `whisper-rs` (whisper.cpp via C FFI, v0.16.0). TTS uses `kokoro-tiny` v0.1.0 (espeak-ng phonemizer, ONNX Runtime via `ort` rc.12, `cuda` feature enabled).
 
-**Reasoning:** Server-side keeps the full pipeline under one process and avoids pushing STT complexity to clients. In-process was chosen over separate Python microservices because the Rust ecosystem is mature enough: `whisper-rs` is actively maintained (March 2026) and `any-tts` ships a pure-Rust phonemizer with no system espeak-ng dependency (April 2026). `any-tts` was chosen over `kokoroxide` (requires espeak-ng) and `tts-rs` (streaming support unclear) for its clean trait-based API and zero system dependencies. `faster-whisper-rs` was rejected: v0.1.0, 21 stars, calls the Python faster-whisper API under the hood — not truly in-process.
+**Reasoning:** Server-side keeps the full pipeline under one process and avoids pushing STT complexity to clients. In-process was chosen over separate Python microservices because the Rust ecosystem is mature enough. `faster-whisper-rs` was rejected: v0.1.0, 21 stars, calls the Python faster-whisper API under the hood — not truly in-process. TTS went through several iterations (`any-tts`, `kokoroxide`, `tts-rs`) before settling on `kokoro-tiny`; see the 2026-06-23 TTS library decision entries for the full history.
 
 ---
 
@@ -171,6 +171,16 @@ A log of significant technical and architectural decisions, including the reason
 
 **Reasoning:** `any-tts`'s `load_model()` internally creates its own `tokio::runtime::Runtime`. When this runtime is dropped inside an existing async context (i.e., inside `#[tokio::main]`), Tokio panics with "Cannot drop a runtime in a context where blocking is not allowed." Wrapping the call in `spawn_blocking` moves it onto a thread outside the async runtime's blocking-prohibition zone, which allows the nested runtime to be created and dropped safely.
 
+**Superseded by:** 2026-06-23 — `AppState::new()` made async after switch to kokoro-tiny (below).
+
+---
+
+## 2026-06-23 — `AppState::new()` made async; `spawn_blocking` wrapper removed from `main.rs`
+
+**Decision:** `AppState::new()` is now `async fn` and called directly via `AppState::new().await` in `main.rs`. The `tokio::task::spawn_blocking` wrapper that previously surrounded the entire call is removed.
+
+**Reasoning:** The nested-runtime panic was caused by `any-tts`'s `load_model()` creating its own internal `tokio::runtime::Runtime`. `kokoro-tiny`'s `TtsEngine::new()` is a native async function — it uses the existing Tokio runtime directly and never creates a nested one. With that constraint gone, `AppState::new()` can simply be `async`. The `spawn_blocking` call becomes unnecessary and is removed. Whisper loading (which is CPU-bound and blocking) is still wrapped in its own `spawn_blocking` call inside `AppState::new()`.
+
 ---
 
 ## 2026-06-23 — `voice_response: bool` on `TextMessagePayload`
@@ -194,6 +204,30 @@ A log of significant technical and architectural decisions, including the reason
 **Decision:** The active Kokoro voice is configurable via a `KOKORO_VOICE=<name>` key in `.astra/astra.conf`. It defaults to `af_heart` if the key is absent or the file is missing.
 
 **Reasoning:** Kokoro supports multiple voice presets. Making the voice a runtime config value (rather than a compile-time constant) means it can be changed without touching code. Putting it in `astra.conf` alongside the model paths is consistent with how other runtime settings are managed. The soft fallback (`af_heart`) prevents startup failure on installations that haven't set the key.
+
+---
+
+## 2026-06-23 — Strip markdown before TTS synthesis
+
+**Decision:** Text is passed through a `strip_markdown()` function in `tts.rs` before being sent to the phonemizer. Code fences are dropped entirely; headings, blockquotes, bullets, bold/italic markers, inline code, and Markdown links are either removed or collapsed to their visible text.
+
+**Reasoning:** Phonemizers attempt to pronounce every character they receive. Symbols like `**`, `#`, backticks, and `[text](url)` produce audible noise (e.g., the model trying to say "asterisk asterisk") or break phonemization for the surrounding word. Stripping at this layer is the right boundary — the LLM output is Markdown, the TTS input should be plain prose.
+
+---
+
+## 2026-06-23 — Switch TTS library from kokoroxide to tts-rs (superseded)
+
+**Decision:** `kokoroxide v0.1.5` replaced by `tts-rs v2026.2.1`.
+
+**Superseded by:** kokoro-tiny switch below. `tts-rs` was broken against all available `ort` rc versions (see below) and abandoned.
+
+---
+
+## 2026-06-23 — Switch TTS library from tts-rs to kokoro-tiny
+
+**Decision:** `tts-rs` is abandoned and replaced by `kokoro-tiny v0.1.0` with `features = ["cuda"]`. No model files need to be downloaded manually — `TtsEngine::new()` auto-downloads to `~/.cache/k/` on first run. `KOKORO_MODEL` and `KOKORO_TOKENIZER` config keys are removed from `astra.conf`; only `KOKORO_VOICE` remains.
+
+**Reasoning:** `tts-rs` proved broken against all available `ort` rc versions: `rc.10` exposes `session.inputs` as a field but `tts-rs` calls it as a method; `rc.12` changed `SessionBuilder` error types to `Error<SessionBuilder>` and `tts-rs` doesn't implement the conversion. GitHub issue #1 is open and unresolved; the maintainer is unresponsive. `kokoro-tiny` explicitly targets `ort rc.12`, is actively maintained, has a native async `TtsEngine::new()`, and exposes a clean `engine.synthesize(&text, Some(&voice)) -> Result<Vec<f32>, String>` API. It uses espeak-ng (bundled statically via `espeak-rs-sys`, no system install required) for POS-aware phonemization — better pronunciation than `any-tts`'s built-in phonemizer. `Arc<Mutex<TtsEngine>>` is needed because `synthesize` takes `&mut self`.
 
 ---
 

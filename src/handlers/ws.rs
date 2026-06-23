@@ -33,17 +33,18 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 conversation.add_user_turn(&payload.content);
                                 let response = run_agent_loop(&mut socket, &state, &mut conversation, request_id.clone()).await;
                                 if payload.voice_response {
-                                    match synthesize(state.tts_model.clone(), &state.tts_voice, response).await {
-                                        Ok(samples) => {
+                                    match synthesize(state.tts.clone(), state.tts_voice.clone(), response).await {
+                                        Ok((samples, sample_rate)) => {
                                             let bytes: Vec<u8> = samples
                                                 .iter()
                                                 .flat_map(|s| s.to_le_bytes())
                                                 .collect();
+                                            let _ = std::fs::write("debug_audio.raw", &bytes);
                                             let _ = socket.send(WsFrame::Binary(bytes.into())).await;
                                             let tts_end = Envelope {
                                                 request_id: request_id.clone(),
                                                 message: Message::TtsEnd(TtsEndPayload {
-                                                    sample_rate: state.tts_sample_rate,
+                                                    sample_rate,
                                                     channels: 1,
                                                     format: "f32le".to_string(),
                                                 }),
@@ -81,22 +82,23 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                         )
                                         .await;
 
-                                        match synthesize(state.tts_model.clone(), &state.tts_voice, response).await {
-                                            Ok(samples) => {
+                                        match synthesize(state.tts.clone(), state.tts_voice.clone(), response).await {
+                                            Ok((samples, sample_rate)) => {
                                                 let bytes: Vec<u8> = samples
                                                     .iter()
                                                     .flat_map(|s| s.to_le_bytes())
                                                     .collect();
+                                                let _ = std::fs::write("debug_audio.raw", &bytes);
                                                 let _ = socket
                                                     .send(WsFrame::Binary(bytes.into()))
                                                     .await;
                                                 let tts_end = Envelope {
                                                     request_id: request_id.clone(),
                                                     message: Message::TtsEnd(TtsEndPayload {
-                                                    sample_rate: state.tts_sample_rate,
-                                                    channels: 1,
-                                                    format: "f32le".to_string(),
-                                                }),
+                                                        sample_rate,
+                                                        channels: 1,
+                                                        format: "f32le".to_string(),
+                                                    }),
                                                 };
                                                 if let Ok(s) = serde_json::to_string(&tts_end) {
                                                     let _ = socket

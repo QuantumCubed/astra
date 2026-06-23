@@ -1,21 +1,67 @@
-use any_tts::{load_model, ModelType, SynthesisRequest, TtsConfig, TtsModel};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use kokoro_tiny::TtsEngine;
 
-pub fn load_tts_model(model_path: &str) -> anyhow::Result<Arc<dyn TtsModel>> {
-    let model = load_model(TtsConfig::new(ModelType::Kokoro).with_model_path(model_path))?;
-    Ok(Arc::from(model))
+pub async fn load_tts_engine() -> anyhow::Result<Arc<Mutex<TtsEngine>>> {
+    let engine = TtsEngine::new()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to load Kokoro model: {e}"))?;
+    Ok(Arc::new(Mutex::new(engine)))
 }
 
-pub async fn synthesize(model: Arc<dyn TtsModel>, voice: &str, text: String) -> anyhow::Result<Vec<f32>> {
-    let voice = voice.to_string();
+pub async fn synthesize(
+    tts: Arc<Mutex<TtsEngine>>,
+    voice: String,
+    text: String,
+) -> anyhow::Result<(Vec<f32>, u32)> {
     let text = strip_markdown(&text);
     tokio::task::spawn_blocking(move || {
-        let audio = model.synthesize(
-            &SynthesisRequest::new(&text).with_language("en").with_voice(&voice),
-        )?;
-        Ok(audio.samples)
+        let mut engine = tts
+            .lock()
+            .map_err(|_| anyhow::anyhow!("TTS engine lock poisoned"))?;
+        let mut all_samples = Vec::new();
+        for sentence in split_sentences(&text) {
+            let samples = engine
+                .synthesize(&sentence, Some(&voice))
+                .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {e}"))?;
+            all_samples.extend(samples);
+        }
+        Ok((all_samples, 24000u32))
     })
     .await?
+}
+
+fn split_sentences(text: &str) -> Vec<String> {
+    let mut sentences = Vec::new();
+    let mut start = 0;
+    let bytes = text.as_bytes();
+
+    for i in 0..bytes.len() {
+        if matches!(bytes[i], b'.' | b'!' | b'?')
+            && (i + 1 == bytes.len() || bytes[i + 1] == b' ')
+        {
+            let s = text[start..=i].trim().to_string();
+            if !s.is_empty() {
+                sentences.push(s);
+            }
+            start = (i + 2).min(bytes.len());
+        }
+    }
+
+    if start < text.len() {
+        let s = text[start..].trim().to_string();
+        if !s.is_empty() {
+            sentences.push(s);
+        }
+    }
+
+    if sentences.is_empty() {
+        let s = text.trim().to_string();
+        if !s.is_empty() {
+            sentences.push(s);
+        }
+    }
+
+    sentences
 }
 
 fn strip_markdown(text: &str) -> String {
@@ -33,9 +79,12 @@ fn strip_markdown(text: &str) -> String {
         }
         let t = strip_block_markers(t);
         let t = strip_inline_markers(t);
+        let t = strip_unpronounceable(&t);
         if !t.is_empty() {
+            if !out.is_empty() {
+                out.push(' ');
+            }
             out.push_str(&t);
-            out.push('\n');
         }
     }
 
@@ -53,13 +102,27 @@ fn strip_block_markers(line: &str) -> &str {
     } else {
         s
     };
-    // Strip numbered list prefix: "1. text" → "text"
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() && bytes[i].is_ascii_digit() {
         i += 1;
     }
     if i > 0 && s[i..].starts_with(". ") { &s[i + 2..] } else { s }
+}
+
+fn strip_unpronounceable(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_space = false;
+    for c in s.chars() {
+        if c.is_ascii() && !c.is_ascii_control() {
+            out.push(c);
+            last_space = c == ' ';
+        } else if !last_space {
+            out.push(' ');
+            last_space = true;
+        }
+    }
+    out.trim().to_string()
 }
 
 fn strip_inline_markers(s: &str) -> String {
@@ -69,19 +132,16 @@ fn strip_inline_markers(s: &str) -> String {
     while let Some(c) = chars.next() {
         match c {
             '*' | '_' => {
-                // Skip double marker (** or __) too
                 if chars.peek() == Some(&c) {
                     chars.next();
                 }
             }
             '`' => {
-                // Skip all consecutive backticks (inline code opener/closer)
                 while chars.peek() == Some(&'`') {
                     chars.next();
                 }
             }
             '[' => {
-                // [text](url) → text; otherwise pass through
                 let mut link_text = String::new();
                 let mut closed = false;
                 for lc in chars.by_ref() {
@@ -92,7 +152,7 @@ fn strip_inline_markers(s: &str) -> String {
                     link_text.push(lc);
                 }
                 if closed && chars.peek() == Some(&'(') {
-                    chars.next(); // consume '('
+                    chars.next();
                     let mut depth = 1i32;
                     for lc in chars.by_ref() {
                         match lc {

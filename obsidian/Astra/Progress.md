@@ -9,6 +9,24 @@ updated: 2026-06-23
 
 ---
 
+## 2026-06-23 — TTS Library Migration Complete (kokoro-tiny)
+
+- Tested TTS output with `any-tts`; identified mispronounced words ("astra", "assistant", "object" as heteronym) — root cause: in-tree pure-Rust phonemizer has limited dictionary and no POS awareness
+- Added `strip_markdown()` to `tts.rs` — strips `**`, `*`, `_`, `` ` ``, `#`, `>`, `- `, `1. `, `[text](url)` and code fences before phonemization; eliminates symbol noise in speech output
+- Attempted `kokoroxide v0.1.5` — broken: all `ort ^1.16` versions yanked; crate unmaintained
+- Attempted `tts-rs v2026.2.1` — broken against all available `ort` rc versions: rc.10 has `session.inputs` as a field (tts-rs calls it as a method); rc.12 changed `SessionBuilder` error types (open issue #1, maintainer unresponsive)
+- Switched to `kokoro-tiny v0.1.0`: native async `TtsEngine::new()`, espeak-ng phonemizer (bundled statically via `espeak-rs-sys`, no system install), `cuda` feature, auto-downloads models to `~/.cache/k/`
+- Rewrote `tts.rs`: `load_tts_engine()` (async, returns `Arc<Mutex<TtsEngine>>`), `synthesize()` (offloads to `spawn_blocking`), `strip_markdown()`
+- Rewrote `state.rs`: `AppState::new()` is now `async fn`; `tts: Arc<Mutex<TtsEngine>>`; whisper loading still in its own `spawn_blocking`; removed `tts_sample_rate` field
+- Updated `main.rs`: dropped `spawn_blocking` wrapper — `AppState::new().await` directly
+- Simplified `config.rs`: removed `load_tts_model_path()`, `load_tts_voices_path()`, `load_kokoro_tokenizer_path()`; only `OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `KOKORO_VOICE` keys remain
+- Updated `Cargo.toml`: removed `kokoroxide`, `ort` pin; added `kokoro-tiny = { version = "0.1.0", features = ["cuda"] }`
+- Updated `.astra/astra.conf`: removed `KOKORO_MODEL` and `KOKORO_TOKENIZER` keys; `KOKORO_VOICE=af_heart` retained
+- Added webfetch reliability rule to `.claude/rules/webfetch.md` — prefer raw source over READMEs; treat WebFetch signatures as hypotheses; compiler errors override fetched claims
+- Updated memory: `project_tts_library.md` documents full TTS crate landscape with reasons for each decision
+
+---
+
 ## 2026-06-23 — Phase 2 Audio Pipeline Complete
 
 - Implemented `backend/audio/tts.rs`: `load_tts_model()` (loads Kokoro via any-tts, returns `Arc<dyn TtsModel>`) and `synthesize()` (offloads to `spawn_blocking`, returns `Vec<f32>` PCM)
