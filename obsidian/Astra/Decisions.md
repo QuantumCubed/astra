@@ -117,6 +117,14 @@ A log of significant technical and architectural decisions, including the reason
 
 ---
 
+## 2026-06-22 — `Arc<WhisperContext>` without Mutex for concurrent multi-user STT
+
+**Decision:** `WhisperContext` is stored in `AppState` as `Arc<WhisperContext>` with no `Mutex`. Each WebSocket connection creates its own `WhisperState` via `ctx.create_state()` when it needs to transcribe.
+
+**Reasoning:** `WhisperContext` holds the model weights and is read-only after loading — nothing mutates it at runtime. The mutable working state for each transcription lives in `WhisperState`, which is created per-call and not shared. Since the shared value is effectively immutable, `Arc` alone is sufficient and correct; adding `Mutex` would serialize all STT calls across connections, preventing simultaneous transcription for multiple users. For a home assistant targeting multiple concurrent users, serialized STT is an unnecessary bottleneck.
+
+---
+
 ## 2026-06-22 — Server-side audio pipeline with in-process Rust libraries
 
 **Decision:** STT and TTS both run server-side, in-process within the Astra Rust binary. STT uses `whisper-rs` (whisper.cpp via C FFI, v0.16.0). TTS uses `any-tts` with the Kokoro backend (Candle-based, pure Rust, v0.1.1).

@@ -37,3 +37,16 @@ pub fn load_system_prompt() -> Result<String, std::io::Error> {
 
     Ok(prompt)
 }
+
+pub fn load_whisper_model_path() -> Result<String, std::io::Error> {
+    let content = std::fs::read_to_string(".astra/astra.conf")?;
+    for line in content.lines() {
+        if let Some(value) = line.strip_prefix("WHISPER_MODEL=") {
+            return Ok(value.trim().to_string());
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "WHISPER_MODEL key not found in .astra/astra.conf",
+    ))
+}

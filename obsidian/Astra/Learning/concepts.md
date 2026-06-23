@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-22
+updated: 2026-06-23
 ---
 
 # Concepts
@@ -8,6 +8,16 @@ updated: 2026-06-22
 [[LEARNING]]
 
 A running log of Rust concepts, patterns, and principles encountered during development of Astra. Entries marked **Claude** were explained during a session. Entries marked **Self-discovered** were figured out independently.
+
+---
+
+## `Arc<T>` vs `Arc<Mutex<T>>` for Shared State
+
+**Date:** 2026-06-23
+**Context:** Deciding how to store `WhisperContext` in `AppState` for concurrent multi-user STT
+**Source:** Claude
+
+`Arc<T>` gives shared ownership of a value across threads, but only works safely when the value is either immutable or internally synchronized. `Arc<Mutex<T>>` adds a lock so the value can be mutated — but only one thread at a time, which serializes access. The key question when choosing is: does anything need to *mutate* the shared value concurrently? `WhisperContext` holds model weights and is read-only after loading; each transcription creates a separate `WhisperState` for its own mutable working data. So `Arc<WhisperContext>` is correct — multiple connections read the model simultaneously with no contention, and no lock is needed.
 
 ---
 

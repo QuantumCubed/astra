@@ -1,3 +1,4 @@
 /target
 settings.local.json
 astra.conf
+.astra/models

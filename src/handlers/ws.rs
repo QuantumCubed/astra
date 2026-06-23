@@ -19,6 +19,7 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> 
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
     let mut conversation = Conversation::new(state.system_prompt.clone());
+    let mut audio_buffer: Vec<u8> = Vec::new();
 
     while let Some(Ok(msg)) = socket.recv().await {
         match msg {
@@ -30,6 +31,10 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             Message::TextMessage(payload) => {
                                 conversation.add_user_turn(&payload.content);
                                 run_agent_loop(&mut socket, &state, &mut conversation, request_id).await;
+                            }
+                            Message::AudioEnd => {
+                                let _transcript = "stub".to_string(); // STT call goes here
+                                audio_buffer.clear();
                             }
                             _ => {}
                         }
@@ -49,8 +54,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
             }
 
-            WsFrame::Binary()
+            WsFrame::Binary(bytes) => {
+                audio_buffer.extend_from_slice(&bytes);
+            }
 
+            // ADD Ping/Pong later
 
             WsFrame::Close(_) => return,
             _ => {}

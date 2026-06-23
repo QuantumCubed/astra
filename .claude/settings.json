@@ -3,6 +3,8 @@
     "allow": [
       "Edit(obsidian/**)",
       "Write(obsidian/**)",
+      "Edit(README.md)",
+      "Write(README.md)",
       "Bash(cargo *)",
       "PowerShell(cargo *)",
       "Bash(ls)",

@@ -35,17 +35,19 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init |
-| `src/backend/state.rs` | `AppState` — tools, system prompt, ollama URL, shared reqwest client |
-| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` |
+| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, Whisper model path, shared reqwest client |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys |
 | `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
 | `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
 | `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
 | `src/backend/ollama/types.rs` | `OllamaMessage`, `ChatRequest`, `Role` enum |
-| `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop |
+| `src/backend/audio.rs` | Audio module root |
+| `src/backend/audio/stt.rs` | STT integration — whisper-rs (stub) |
+| `src/backend/audio/tts.rs` | TTS integration — any-tts/Kokoro (stub) |
+| `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop, audio buffer |
 | `src/tools/registry.rs` | `Tool`/`ToolFunction` structs, `register_tools()` |
 | `src/tools/dispatch.rs` | Routes tool call by name to implementation |
 | `src/tools/implementations.rs` | Async tool logic (`tokio::process::Command`) |
-| `src/integrations/script/` | Shell scripts invoked by tool implementations |
 
 ## Conversation State
 

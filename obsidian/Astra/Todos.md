@@ -15,8 +15,7 @@ _Phase 2 — Voice pipeline._
 
 ### Phase 2 — Voice Pipeline
 
-- [ ] Build `backend/audio/` module structure (`audio.rs`, `audio/stt.rs`, `audio/tts.rs`)
-- [ ] Handle binary WebSocket frames in `handlers/ws.rs` (accumulate PCM chunks until `AudioEnd`)
+- [ ] Add `Arc<WhisperContext>` to `AppState` (shared read-only model, per-connection `WhisperState`)
 - [ ] Implement STT via `whisper-rs` in `backend/audio/stt.rs`
 - [ ] Implement TTS via `any-tts` (Kokoro) in `backend/audio/tts.rs`
 - [ ] Stream TTS PCM chunks back to client as binary frames
@@ -30,6 +29,10 @@ _Phase 2 — Voice pipeline._
 
 ## Done
 
+- [x] Add `WhisperContext` to `AppState` as `Arc<WhisperContext>` for multi-user concurrent STT — pending (design decided, not yet implemented)
+- [x] `backend/audio/` module skeleton created (`audio.rs`, `audio/stt.rs`, `audio/tts.rs`)
+- [x] Binary WebSocket frame handling in `handlers/ws.rs` — PCM chunks accumulate in `audio_buffer`, `AudioEnd` triggers pipeline (stub)
+- [x] `whisper_model_path` added to `AppState`, loaded from `WHISPER_MODEL` in `astra.conf`
 - [x] STT/TTS placement decision — server-side, in-process (`whisper-rs` + `any-tts`); see [[Decisions]]
 - [x] Audio protocol message types added to `backend/protocol.rs` (`AudioEnd`, `Transcript`, `TtsEnd`)
 - [x] `whisper-rs` and `any-tts` added to `Cargo.toml`

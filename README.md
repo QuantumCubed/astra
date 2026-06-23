@@ -27,10 +27,11 @@ All runtime config lives in `.astra/` at the project root.
 **`.astra/astra.conf`** — required. Create this file before running the server:
 
 ```
-OLLAMA_IP=http://<your-ollama-host>:11434
+OLLAMA_ENDPOINT=http://<your-ollama-host>:11434
+WHISPER_MODEL=.astra/models/stt/ggml-base.en.bin
 ```
 
-The server will fail at startup with a clear error if this file or key is missing.
+The server will fail at startup with a clear error if either key is missing. Whisper model files (`.ggml` format) can be downloaded from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp). `ggml-base.en.bin` is a good starting point (~142MB).
 
 **`.astra/core/`** — hard behavioral constraints injected into every Ollama request (identity, tool rules, behavior). Loaded first.
 

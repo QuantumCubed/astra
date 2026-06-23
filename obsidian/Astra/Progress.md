@@ -17,6 +17,10 @@ updated: 2026-06-22
 - Added `whisper-rs` and `any-tts` to `Cargo.toml`; resolved Windows build dependency: LLVM/libclang required for whisper-rs bindgen step (installed via winget)
 - Added audio control message types to `backend/protocol.rs`: `AudioEnd`, `Transcript(TranscriptPayload)`, `TtsEnd`; binary WS frames carry raw PCM
 - Push-to-talk selected for utterance boundary signaling; VAD deferred as a client-side concern
+- Created `backend/audio/` module skeleton (`audio.rs`, `audio/stt.rs`, `audio/tts.rs`)
+- Added binary WebSocket frame handling to `handlers/ws.rs`: `audio_buffer: Vec<u8>` accumulates PCM chunks; `AudioEnd` message triggers pipeline (stubbed); `WsFrame::Binary` arm appends to buffer
+- Added `whisper_model_path: String` to `AppState`, loaded from `WHISPER_MODEL` key in `astra.conf`; added `load_whisper_model_path()` to `config.rs`
+- Decided: `WhisperContext` will be stored as `Arc<WhisperContext>` (no Mutex) — model is read-only after loading, each connection creates its own `WhisperState` per transcription for true concurrent multi-user STT
 
 ---
 
