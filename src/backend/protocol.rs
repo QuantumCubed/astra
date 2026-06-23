@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct TextMessagePayload {
     pub content: String,
+    #[serde(default)]
+    pub voice_response: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -28,8 +30,16 @@ pub struct ErrorPayload {
     pub message: String,
     pub code: String,
 }
-#[derive(Serialize, Deserialize)]pub struct TranscriptPayload {
-    pub text: String
+#[derive(Serialize, Deserialize)]
+pub struct TranscriptPayload {
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TtsEndPayload {
+    pub sample_rate: u32,
+    pub channels: u8,
+    pub format: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -38,7 +48,7 @@ pub enum Message {
     TextMessage(TextMessagePayload),
     AudioEnd,
     Transcript(TranscriptPayload),
-    TtsEnd,
+    TtsEnd(TtsEndPayload),
     TextChunk(TextChunkPayload),
     ToolCall(ToolCallPayload),
     ToolResult(ToolResultPayload),

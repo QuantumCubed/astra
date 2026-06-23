@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-22
+updated: 2026-06-23
 ---
 
 # Architecture
@@ -35,16 +35,16 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init |
-| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, Whisper model path, shared reqwest client |
-| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys |
+| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, shared reqwest client, `Arc<WhisperContext>`, `Arc<dyn TtsModel>`, `tts_sample_rate`, `tts_voice` |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys (`OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `KOKORO_MODEL`, `KOKORO_VOICE`) |
 | `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
 | `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
 | `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
 | `src/backend/ollama/types.rs` | `OllamaMessage`, `ChatRequest`, `Role` enum |
 | `src/backend/audio.rs` | Audio module root |
-| `src/backend/audio/stt.rs` | STT integration — whisper-rs (stub) |
-| `src/backend/audio/tts.rs` | TTS integration — any-tts/Kokoro (stub) |
-| `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop, audio buffer |
+| `src/backend/audio/stt.rs` | STT — `load_whisper_ctx` + `transcribe` (whisper-rs 0.16.0, `spawn_blocking`) |
+| `src/backend/audio/tts.rs` | TTS — `load_tts_model` + `synthesize` (any-tts/Kokoro, `spawn_blocking`) |
+| `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop, audio buffer, full voice pipeline |
 | `src/tools/registry.rs` | `Tool`/`ToolFunction` structs, `register_tools()` |
 | `src/tools/dispatch.rs` | Routes tool call by name to implementation |
 | `src/tools/implementations.rs` | Async tool logic (`tokio::process::Command`) |
@@ -88,18 +88,18 @@ All text frames use a JSON envelope:
 
 | Type | Direction | Notes |
 |---|---|---|
-| `text_message` | Client → Server | Text chat input |
+| `text_message` | Client → Server | Text chat input; optional `voice_response: bool` triggers TTS reply |
 | `text_chunk` | Server → Client | Streaming LLM output; `done: true` = end of response |
 | `tool_call` | Server → Client | Tool dispatched by model |
 | `tool_result` | Server → Client | Tool output sent back to model |
 | `audio_end` | Client → Server | Signals end of mic audio (push-to-talk) |
 | `transcript` | Server → Client | STT result from Whisper |
-| `tts_end` | Server → Client | Signals end of TTS audio stream |
+| `tts_end` | Server → Client | Signals end of TTS audio stream; carries `TtsEndPayload { sample_rate, channels, format }` |
 | `error` | Server → Client | Error envelope |
 
-**Binary frames** carry raw PCM audio — no JSON wrapper. Incoming = mic audio (16kHz mono 16-bit); outgoing = TTS output (24kHz).
+**Binary frames** carry raw PCM audio — no JSON wrapper. Incoming = mic audio (16kHz mono 16-bit LE); outgoing = TTS output (f32 LE, sample rate reported in `TtsEndPayload.sample_rate`).
 
-## Audio Pipeline (Phase 2 — in progress)
+## Audio Pipeline (Phase 2 — complete)
 
 ```
 binary WS frames (PCM chunks)

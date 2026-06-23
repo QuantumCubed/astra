@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-22
+updated: 2026-06-23
 ---
 
 # Todos
@@ -9,17 +9,15 @@ updated: 2026-06-22
 
 ## In Progress
 
-_Phase 2 — Voice pipeline._
+_Phase 2 — voice pipeline code complete; pending end-to-end test with a real client._
 
 ## Backlog
 
 ### Phase 2 — Voice Pipeline
 
-- [ ] Add `Arc<WhisperContext>` to `AppState` (shared read-only model, per-connection `WhisperState`)
-- [ ] Implement STT via `whisper-rs` in `backend/audio/stt.rs`
-- [ ] Implement TTS via `any-tts` (Kokoro) in `backend/audio/tts.rs`
-- [ ] Stream TTS PCM chunks back to client as binary frames
-- [ ] Send `Transcript` message to client after STT, before LLM call
+- [ ] Download Whisper `ggml-base.en.bin` model file to `.astra/models/stt/`
+- [ ] End-to-end voice path test with a real client
+- [ ] Sentence-boundary streaming for TTS (synthesize in chunks as LLM streams, reduce latency)
 
 ### Phase 3 — Tool Layer
 
@@ -29,7 +27,18 @@ _Phase 2 — Voice pipeline._
 
 ## Done
 
-- [x] Add `WhisperContext` to `AppState` as `Arc<WhisperContext>` for multi-user concurrent STT — pending (design decided, not yet implemented)
+- [x] WSL2 (Ubuntu) established as development environment for Linux/CUDA builds — native Windows MSVC is blocked by an irresolvable CRT conflict (LNK2038)
+- [x] `AppState::new()` wrapped in `spawn_blocking` in `main.rs` — avoids Tokio runtime panic from any-tts's internal runtime
+- [x] `voice_response: bool` added to `TextMessagePayload` — text messages can optionally request TTS output
+- [x] `TtsEnd` upgraded to `TtsEnd(TtsEndPayload)` with `sample_rate`, `channels`, `format` — client can configure audio playback correctly
+- [x] `KOKORO_VOICE` key added to `astra.conf`; `load_tts_voice()` added to `config.rs`; `tts_voice: String` added to `AppState`
+- [x] `WhisperContextParameters::use_gpu(true)` set in `load_whisper_ctx()` — GPU not auto-selected without explicit flag
+- [x] `cuda` feature enabled for `whisper-rs` and `any-tts` in `Cargo.toml`
+- [x] Add `Arc<WhisperContext>` and `Arc<dyn TtsModel>` to `AppState` — models loaded at startup, shared across connections
+- [x] Implement STT in `backend/audio/stt.rs` — `load_whisper_ctx` + `transcribe` (whisper-rs 0.16.0, `as_iter()` API)
+- [x] Implement TTS in `backend/audio/tts.rs` — `load_tts_model` + `synthesize` (any-tts/Kokoro)
+- [x] Wire audio pipeline in `handlers/ws.rs` — `AudioEnd` → STT → `Transcript` → agent loop → TTS → binary PCM frames → `TtsEnd`
+- [x] Add `KOKORO_MODEL` and `WHISPER_MODEL` keys to `.astra/astra.conf`; add `load_tts_model_path()` to `config.rs`
 - [x] `backend/audio/` module skeleton created (`audio.rs`, `audio/stt.rs`, `audio/tts.rs`)
 - [x] Binary WebSocket frame handling in `handlers/ws.rs` — PCM chunks accumulate in `audio_buffer`, `AudioEnd` triggers pipeline (stub)
 - [x] `whisper_model_path` added to `AppState`, loaded from `WHISPER_MODEL` in `astra.conf`

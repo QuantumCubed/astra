@@ -11,6 +11,46 @@ A running log of Rust concepts, patterns, and principles encountered during deve
 
 ---
 
+## `tokio::task::spawn_blocking` for CPU-Bound Work in Async
+
+**Date:** 2026-06-23
+**Context:** Running Whisper STT inference and Kokoro TTS synthesis inside an async handler in `backend/audio/`
+**Source:** Claude
+
+Tokio's async executor runs many tasks on a small, fixed thread pool. If a task blocks a thread with a CPU-intensive or blocking call (like ML inference), it starves other tasks. `spawn_blocking` offloads the call to a separate thread pool sized for blocking work, so the async runtime stays responsive. The closure you pass takes ownership of what it needs, runs synchronously, and returns a result. `spawn_blocking` itself returns a `JoinHandle<T>`, which you `.await` to get the result. Because `JoinHandle` wraps its inner result in an outer `Result<T, JoinError>` (to handle panics), you'll often see `.await?` twice or chain `.await?` directly when the closure returns `anyhow::Result<T>` — the first `?` handles the join error, producing the inner `anyhow::Result<T>`, and the function's own `?` propagates that.
+
+---
+
+## `Arc<dyn Trait>` for Shared Trait Objects
+
+**Date:** 2026-06-23
+**Context:** Storing the loaded TTS model (`Arc<dyn TtsModel>`) in `AppState` for sharing across connections
+**Source:** Claude
+
+When you want shared ownership of a value that implements a trait but you don't know (or don't want to fix) the concrete type at compile time, you use `Arc<dyn Trait>`. The `dyn Trait` is a *trait object* — a fat pointer that bundles a data pointer and a vtable for dynamic dispatch. Wrapping it in `Arc` gives cheap shared ownership across threads via reference counting. To put a `Box<dyn Trait>` into an `Arc<dyn Trait>`, you coerce with `Arc::from(box_value)`. For this to work across threads, the trait must be `Send + Sync` (or explicitly implement those via `unsafe impl`).
+
+---
+
+## `anyhow` for Cross-Boundary Error Handling
+
+**Date:** 2026-06-23
+**Context:** Propagating errors from whisper-rs FFI and any-tts in `backend/audio/`
+**Source:** Claude
+
+`anyhow::Result<T>` is an alias for `Result<T, anyhow::Error>`, where `anyhow::Error` can hold any error type that implements `std::error::Error`. This makes it convenient for functions that call into multiple libraries whose error types are incompatible — you convert each with `.map_err(|e| anyhow::anyhow!("{e}"))` and then use `?` uniformly. The payoff is that `anyhow::Error` is `Send + Sync`, so it works inside `spawn_blocking` closures and across thread boundaries where bare trait errors often don't.
+
+---
+
+## `std::mem::take` to Drain a Collection In-Place
+
+**Date:** 2026-06-23
+**Context:** Extracting the audio buffer in `handlers/ws.rs` before passing it to `transcribe`
+**Source:** Claude
+
+`std::mem::take(&mut value)` moves the value out of the mutable reference and replaces it with the type's `Default` value (for `Vec`, that's an empty `Vec`). This is how you take ownership of a collection from a `&mut` reference without cloning — you can't just move out of a mutable reference, but `take` does the swap atomically. The result is that the original variable is left in a valid (empty) state while you own the data. The alternative, `std::mem::replace(&mut value, Default::default())`, is equivalent but more verbose.
+
+---
+
 ## `Arc<T>` vs `Arc<Mutex<T>>` for Shared State
 
 **Date:** 2026-06-23
@@ -171,5 +211,32 @@ WebSocket handlers in Axum work differently from regular HTTP handlers. The rout
 **Source:** Claude
 
 `socket.recv()` returns `Option<Result<T, E>>` — two layers of wrapping. `Option` signals whether the stream is still open; `Result` signals whether the message was valid. You can unwrap both in a single `while let` pattern: `while let Some(Ok(msg)) = socket.recv().await`. This advances the loop only when both layers succeed, and exits cleanly when the socket closes (`None`) or produces an error (`Err`). The alternative is to unwrap them separately, but the combined form is idiomatic for this pattern.
+
+---
+
+## Windows MSVC CRT Conflict (`/MD` vs `/MT`)
+**Date:** 2026-06-23
+**Context:** Trying to build Astra with both `whisper-rs` and `any-tts` on Windows MSVC
+**Source:** Claude
+
+On Windows, C++ code can link against the C runtime in two incompatible ways: `/MD` (dynamic CRT — MSVCRT.dll) or `/MT` (static CRT — baked into the binary). The linker treats this as a per-object metadata tag and will hard-error (LNK2038 "mismatch detected for RuntimeLibrary") if any two `.obj` files in the same link disagree. This is not a warning; it cannot be suppressed with `/NODEFAULTLIB` or other flags because it's a metadata mismatch, not a defaultlib conflict. `whisper-rs-sys` compiles its C++ with `/MD`, while `esaxx-rs` and `candle-kernels` (pulled in by any-tts) compile with `/MT`. No linker workaround exists — the fix is to build on Linux (WSL2 or a remote server) where this concept doesn't exist.
+
+---
+
+## Tokio Runtime Nesting Panic
+**Date:** 2026-06-23
+**Context:** `AppState::new()` calling `any-tts`'s `load_model()` directly inside `#[tokio::main]`
+**Source:** Claude
+
+When you're already inside a Tokio async context (i.e., inside `#[tokio::main]`), Tokio tracks that context on the current thread. If you create a new `tokio::runtime::Runtime` inside that context and then drop it — which is what some libraries do internally during initialization — Tokio panics: "Cannot drop a runtime in a context where blocking is not allowed." The fix is `tokio::task::spawn_blocking(|| { ... })`, which moves the blocking code onto a dedicated thread pool thread that is explicitly outside the async executor's context. That thread is allowed to create and drop runtimes freely. You then `.await` the resulting `JoinHandle` to get the result back into async land.
+
+---
+
+## `&str` Cannot Be Sent Across Threads (`'static` Bound on `spawn_blocking`)
+**Date:** 2026-06-23
+**Context:** Passing a voice name `&str` into a `spawn_blocking` closure in `backend/audio/tts.rs`
+**Source:** Claude
+
+`tokio::task::spawn_blocking` requires its closure to be `'static` — meaning it cannot hold any references that borrow from the current stack frame, because the closure will run on a separate thread that may outlive the current one. A `&str` is a borrowed reference with a lifetime tied to its source; it is not `'static` unless the source is a string literal baked into the binary. The idiomatic fix is to call `.to_string()` on the `&str` before constructing the closure, converting it into an owned `String` that the closure can take by value (`move`). Inside the closure, you can then re-borrow the `String` as `&str` safely, because the `String` is owned by the closure itself.
 
 ---

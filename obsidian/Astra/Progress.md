@@ -1,11 +1,32 @@
 ---
 created: 2026-06-13
-updated: 2026-06-22
+updated: 2026-06-23
 ---
 
 # Progress
 
 [[ASTRA|← Home]]
+
+---
+
+## 2026-06-23 — Phase 2 Audio Pipeline Complete
+
+- Implemented `backend/audio/tts.rs`: `load_tts_model()` (loads Kokoro via any-tts, returns `Arc<dyn TtsModel>`) and `synthesize()` (offloads to `spawn_blocking`, returns `Vec<f32>` PCM)
+- Implemented `backend/audio/stt.rs`: `load_whisper_ctx()` (returns `Arc<WhisperContext>`) and `transcribe()` (offloads to `spawn_blocking`; converts 16-bit LE PCM to f32, runs Whisper inference, collects transcript via `state.as_iter()`)
+- Updated `AppState` to store `whisper_ctx`, `tts_model`, `tts_sample_rate`, and `tts_voice`; all loaded at startup
+- Added `KOKORO_MODEL` and `WHISPER_MODEL` keys to `.astra/astra.conf`; `KOKORO_VOICE` key added for optional voice selection (defaults to `af_heart`)
+- Added `load_tts_model_path()`, `load_whisper_model_path()`, and `load_tts_voice()` to `config.rs`
+- Added `anyhow = "1"` to `Cargo.toml` for cross-FFI error handling
+- Wired full audio pipeline in `handlers/ws.rs`: `AudioEnd` → STT → send `Transcript` → add to conversation → run agent loop → TTS → send binary PCM frames (f32 LE) → send `TtsEnd(TtsEndPayload)`
+- Added `send_error` helper; changed `run_agent_loop` to return `String` (final LLM response text for TTS input)
+- Added `voice_response: bool` to `TextMessagePayload` — text messages can now also trigger TTS output
+- Added `TtsEndPayload { sample_rate, channels, format }` to `TtsEnd` message — client no longer has to guess audio format
+- Fixed whisper-rs 0.16.0 API mismatch: `full_n_segments()` returns `i32` (not `Result`); `full_get_segment_text` doesn't exist — replaced with `state.as_iter()` + `seg.to_str_lossy()`
+- Added `WhisperContextParameters::use_gpu(true)` to STT loader — GPU is not auto-selected by whisper-rs even with `cuda` feature enabled
+- Enabled `cuda` feature for both `whisper-rs` and `any-tts` in `Cargo.toml` (Linux/WSL2 only)
+- Diagnosed fatal Windows MSVC CRT conflict (LNK2038): whisper-rs-sys compiles with `/MD`, esaxx-rs and candle-kernels with `/MT` — no linker workaround exists; established WSL2 (Ubuntu) as primary development environment for Linux/CUDA builds
+- Fixed Tokio runtime panic at startup: `AppState::new()` moved into `tokio::task::spawn_blocking` in `main.rs` — any-tts's `load_model` creates an internal Tokio runtime that panics if dropped inside an async context
+- Created `obsidian/Astra/Learning/audio-pipeline.md` — full walkthrough of tts.rs, stt.rs, ws.rs rewire with data flow diagram
 
 ---
 

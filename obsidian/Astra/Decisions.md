@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-22
+updated: 2026-06-23
 ---
 
 # Decisions
@@ -154,6 +154,46 @@ A log of significant technical and architectural decisions, including the reason
 **Decision:** The audio portion of the WebSocket protocol uses two frame types: binary frames carry raw PCM samples (16kHz mono 16-bit in, 24kHz out); text frames carry JSON-enveloped control messages. Three new `Message` enum variants were added: `AudioEnd` (client → server, no payload), `Transcript(TranscriptPayload)` (server → client, STT result), `TtsEnd` (server → client, signals end of audio stream).
 
 **Reasoning:** Mixing PCM bytes into a JSON envelope via base64 adds 33% overhead and is semantically awkward. The natural split is: binary frame = audio data, text frame = everything else. The `Transcript` message lets the client display what Whisper heard before the LLM responds, which aids debugging and UX.
+
+---
+
+## 2026-06-23 — WSL2 as development environment for Linux/CUDA builds
+
+**Decision:** All builds that involve `whisper-rs` (whisper.cpp FFI) alongside `any-tts` (Candle/esaxx-rs) must be done in WSL2 (Ubuntu), not native Windows MSVC.
+
+**Reasoning:** Windows MSVC cannot link these two crates together. whisper-rs-sys compiles its C++ code with `/MD` (dynamic CRT). esaxx-rs and candle-kernels compile with `/MT` (static CRT). This produces LNK2038 "mismatch detected for RuntimeLibrary" — a per-object-file metadata mismatch that cannot be suppressed with linker flags like `/NODEFAULTLIB:LIBCMT` (which only fixes LNK4098, not LNK2038). Linux does not have the `/MD` vs `/MT` concept at all, so the conflict doesn't exist there. CUDA works in WSL2 via WSL2's CUDA passthrough support.
+
+---
+
+## 2026-06-23 — `AppState::new()` wrapped in `spawn_blocking` in `main.rs`
+
+**Decision:** `AppState::new()` is called via `tokio::task::spawn_blocking(AppState::new).await` rather than directly inside `#[tokio::main]`.
+
+**Reasoning:** `any-tts`'s `load_model()` internally creates its own `tokio::runtime::Runtime`. When this runtime is dropped inside an existing async context (i.e., inside `#[tokio::main]`), Tokio panics with "Cannot drop a runtime in a context where blocking is not allowed." Wrapping the call in `spawn_blocking` moves it onto a thread outside the async runtime's blocking-prohibition zone, which allows the nested runtime to be created and dropped safely.
+
+---
+
+## 2026-06-23 — `voice_response: bool` on `TextMessagePayload`
+
+**Decision:** A boolean `voice_response` field was added to `TextMessagePayload`. When `true`, the server runs TTS on the LLM's reply and sends PCM audio + `TtsEnd` alongside the text stream.
+
+**Reasoning:** Voice output should not be restricted to the mic-input path. Text clients may also want synthesized speech (e.g., a browser page with a "speak" toggle). A single boolean flag on the existing message type is the simplest extension — no new message type, no protocol change, and the field defaults to `false` via `#[serde(default)]` so existing clients are unaffected.
+
+---
+
+## 2026-06-23 — `TtsEnd` carries audio metadata (`TtsEndPayload`)
+
+**Decision:** `TtsEnd` was upgraded from a unit variant to `TtsEnd(TtsEndPayload)` where `TtsEndPayload` contains `sample_rate: u32`, `channels: u8`, and `format: String`.
+
+**Reasoning:** Without metadata, clients must hardcode assumptions about the audio format. When any-tts returns audio, the sample rate is model-determined (accessible via `tts_model.sample_rate()`), not a constant. Sending it in `TtsEnd` lets the client configure its `AudioContext` correctly without any out-of-band configuration. `format: "f32le"` makes the encoding unambiguous. This resolved audio playback issues where the client was guessing the sample rate.
+
+---
+
+## 2026-06-23 — `KOKORO_VOICE` key in `astra.conf` for voice selection
+
+**Decision:** The active Kokoro voice is configurable via a `KOKORO_VOICE=<name>` key in `.astra/astra.conf`. It defaults to `af_heart` if the key is absent or the file is missing.
+
+**Reasoning:** Kokoro supports multiple voice presets. Making the voice a runtime config value (rather than a compile-time constant) means it can be changed without touching code. Putting it in `astra.conf` alongside the model paths is consistent with how other runtime settings are managed. The soft fallback (`af_heart`) prevents startup failure on installations that haven't set the key.
 
 ---
 

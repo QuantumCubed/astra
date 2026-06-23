@@ -4,9 +4,10 @@ use axum::{
 };
 use crate::{
     backend::{
+        audio::{stt::transcribe, tts::synthesize},
         conversation::Conversation,
         ollama::{client, types::ChatRequest},
-        protocol::{Envelope, ErrorPayload, Message, TextChunkPayload},
+        protocol::{Envelope, ErrorPayload, Message, TextChunkPayload, TranscriptPayload, TtsEndPayload},
         state::AppState,
     },
     tools::dispatch,
@@ -30,11 +31,100 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         match envelope.message {
                             Message::TextMessage(payload) => {
                                 conversation.add_user_turn(&payload.content);
-                                run_agent_loop(&mut socket, &state, &mut conversation, request_id).await;
+                                let response = run_agent_loop(&mut socket, &state, &mut conversation, request_id.clone()).await;
+                                if payload.voice_response {
+                                    match synthesize(state.tts_model.clone(), &state.tts_voice, response).await {
+                                        Ok(samples) => {
+                                            let bytes: Vec<u8> = samples
+                                                .iter()
+                                                .flat_map(|s| s.to_le_bytes())
+                                                .collect();
+                                            let _ = socket.send(WsFrame::Binary(bytes.into())).await;
+                                            let tts_end = Envelope {
+                                                request_id: request_id.clone(),
+                                                message: Message::TtsEnd(TtsEndPayload {
+                                                    sample_rate: state.tts_sample_rate,
+                                                    channels: 1,
+                                                    format: "f32le".to_string(),
+                                                }),
+                                            };
+                                            if let Ok(s) = serde_json::to_string(&tts_end) {
+                                                let _ = socket.send(WsFrame::Text(s.into())).await;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            send_error(&mut socket, request_id, "TTS_ERROR", &format!("TTS failed: {e}")).await;
+                                        }
+                                    }
+                                }
                             }
                             Message::AudioEnd => {
-                                let _transcript = "stub".to_string(); // STT call goes here
-                                audio_buffer.clear();
+                                let audio = std::mem::take(&mut audio_buffer);
+                                match transcribe(state.whisper_ctx.clone(), audio).await {
+                                    Ok(transcript) => {
+                                        let reply = Envelope {
+                                            request_id: request_id.clone(),
+                                            message: Message::Transcript(TranscriptPayload {
+                                                text: transcript.clone(),
+                                            }),
+                                        };
+                                        if let Ok(s) = serde_json::to_string(&reply) {
+                                            let _ = socket.send(WsFrame::Text(s.into())).await;
+                                        }
+
+                                        conversation.add_user_turn(&transcript);
+                                        let response = run_agent_loop(
+                                            &mut socket,
+                                            &state,
+                                            &mut conversation,
+                                            request_id.clone(),
+                                        )
+                                        .await;
+
+                                        match synthesize(state.tts_model.clone(), &state.tts_voice, response).await {
+                                            Ok(samples) => {
+                                                let bytes: Vec<u8> = samples
+                                                    .iter()
+                                                    .flat_map(|s| s.to_le_bytes())
+                                                    .collect();
+                                                let _ = socket
+                                                    .send(WsFrame::Binary(bytes.into()))
+                                                    .await;
+                                                let tts_end = Envelope {
+                                                    request_id: request_id.clone(),
+                                                    message: Message::TtsEnd(TtsEndPayload {
+                                                    sample_rate: state.tts_sample_rate,
+                                                    channels: 1,
+                                                    format: "f32le".to_string(),
+                                                }),
+                                                };
+                                                if let Ok(s) = serde_json::to_string(&tts_end) {
+                                                    let _ = socket
+                                                        .send(WsFrame::Text(s.into()))
+                                                        .await;
+                                                }
+                                            }
+                                            Err(e) => {
+                                                send_error(
+                                                    &mut socket,
+                                                    request_id,
+                                                    "TTS_ERROR",
+                                                    &format!("TTS failed: {e}"),
+                                                )
+                                                .await;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        send_error(
+                                            &mut socket,
+                                            request_id,
+                                            "STT_ERROR",
+                                            &format!("transcription failed: {e}"),
+                                        )
+                                        .await;
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -58,11 +148,22 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 audio_buffer.extend_from_slice(&bytes);
             }
 
-            // ADD Ping/Pong later
-
             WsFrame::Close(_) => return,
             _ => {}
         }
+    }
+}
+
+async fn send_error(socket: &mut WebSocket, request_id: Option<String>, code: &str, message: &str) {
+    let reply = Envelope {
+        request_id,
+        message: Message::Error(ErrorPayload {
+            message: message.to_string(),
+            code: code.to_string(),
+        }),
+    };
+    if let Ok(s) = serde_json::to_string(&reply) {
+        let _ = socket.send(WsFrame::Text(s.into())).await;
     }
 }
 
@@ -71,7 +172,7 @@ async fn run_agent_loop(
     state: &AppState,
     conversation: &mut Conversation,
     request_id: Option<String>,
-) {
+) -> String {
     loop {
         let req = ChatRequest {
             model: "qwen3.5:9b".to_string(),
@@ -124,15 +225,19 @@ async fn run_agent_loop(
                     let name = tool_call["function"]["name"].as_str().unwrap_or_default();
                     let args = tool_call["function"]["arguments"].clone();
                     let result = dispatch::dispatch_tool(name, args).await;
-                    let result_str = serde_json::to_string(&result).unwrap_or_else(|_| "error".to_string());
+                    let result_str =
+                        serde_json::to_string(&result).unwrap_or_else(|_| "error".to_string());
                     conversation.add_tool_result(&result_str);
                 }
                 continue;
             } else {
                 conversation.add_astra_turn(&full_content);
+                return full_content;
             }
         }
 
         break;
     }
+
+    String::new()
 }
