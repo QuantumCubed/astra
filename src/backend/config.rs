@@ -19,13 +19,13 @@ fn load_dir(path: &str, output: &mut String) -> Result<(), std::io::Error> {
 pub fn load_ollama_url() -> Result<String, std::io::Error> {
     let content = std::fs::read_to_string(".astra/astra.conf")?;
     for line in content.lines() {
-        if let Some(value) = line.strip_prefix("OLLAMA_IP=") {
+        if let Some(value) = line.strip_prefix("OLLAMA_ENDPOINT=") {
             return Ok(value.trim().to_string());
         }
     }
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
-        "OLLAMA_IP key not found in .astra/astra.conf",
+        "OLLAMA_ENDPOINT key not found in .astra/astra.conf",
     ))
 }
 

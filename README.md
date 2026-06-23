@@ -18,6 +18,7 @@ Phase 1 (WebSocket Foundation) is complete. Phase 2 (Tool Layer) is in progress.
 
 - [Rust](https://rustup.rs/) (edition 2024)
 - A running [Ollama](https://ollama.com/) instance accessible from the host machine
+- **Windows only:** [LLVM](https://github.com/llvm/llvm-project/releases) (required by `whisper-rs` bindgen at build time). Install via `winget install LLVM.LLVM`.
 
 ### Configuration
 
@@ -102,11 +103,14 @@ All messages share a common envelope:
 | `text_chunk` | Server → Client | `{ "content": "...", "done": bool }` |
 | `tool_call` | Server → Client | `{ "name": "...", "args": {...} }` |
 | `tool_result` | Server → Client | `{ "name": "...", "result": "..." }` |
+| `audio_end` | Client → Server | `{}` — signals end of mic audio (push-to-talk) |
+| `transcript` | Server → Client | `{ "text": "..." }` — STT result from Whisper |
+| `tts_end` | Server → Client | `{}` — signals end of TTS audio stream |
 | `error` | Server → Client | `{ "message": "...", "code": "..." }` |
 
 `done: true` on a `text_chunk` means the response for that `request_id` is complete. The WebSocket connection stays open.
 
-Audio is not a JSON message type — it will be sent as binary WebSocket frames (Phase 3).
+**Audio** is not a JSON message type. Raw PCM audio travels as binary WebSocket frames — no wrapper. Incoming mic audio is 16kHz mono 16-bit; outgoing TTS is 24kHz. JSON control messages (`audio_end`, `transcript`, `tts_end`) coordinate the pipeline.
 
 ## Commands
 
@@ -129,8 +133,8 @@ cargo clippy  # lint
 | Phase | Goal | Status |
 |---|---|---|
 | 1 | WebSocket Foundation — transport, protocol, conversation state, config | Complete |
-| 2 | Tool Layer — real tools, structured error handling, per-tool modules | In progress |
-| 3 | Voice Interface — STT/TTS, audio frames, VAD, interruption handling | Pending |
+| 2 | Voice Interface — STT/TTS, audio frames, push-to-talk, TTS streaming | In progress |
+| 3 | Tool Layer — real tools, structured error handling, per-tool modules | Backlog |
 | 4 | Web Client — browser-based text/voice UI | Pending |
 | 5 | Agents & Expansion — multi-step agents, smart home, mobile/desktop clients | Pending |
 

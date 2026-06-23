@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 
 # Todos
@@ -9,23 +9,31 @@ updated: 2026-06-21
 
 ## In Progress
 
-_Phase 2 — Tool layer improvements._
+_Phase 2 — Voice pipeline._
 
 ## Backlog
 
-### Phase 2 — Tool Layer
+### Phase 2 — Voice Pipeline
 
-- [ ] Fix tool implementations to capture stdout (currently return `ExitStatus` only — tool results sent to model are meaningless)
+- [ ] Build `backend/audio/` module structure (`audio.rs`, `audio/stt.rs`, `audio/tts.rs`)
+- [ ] Handle binary WebSocket frames in `handlers/ws.rs` (accumulate PCM chunks until `AudioEnd`)
+- [ ] Implement STT via `whisper-rs` in `backend/audio/stt.rs`
+- [ ] Implement TTS via `any-tts` (Kokoro) in `backend/audio/tts.rs`
+- [ ] Stream TTS PCM chunks back to client as binary frames
+- [ ] Send `Transcript` message to client after STT, before LLM call
+
+### Phase 3 — Tool Layer
+
 - [ ] Refactor tool implementations into per-tool modules
 - [ ] Structured tool error handling (tool failures must not crash the request)
 - [ ] Define and implement first real tool
 
-### Later
-
-- [ ] STT/TTS placement decision (see [[Roadmap#Phase 3 — Voice Interface]])
-
 ## Done
 
+- [x] STT/TTS placement decision — server-side, in-process (`whisper-rs` + `any-tts`); see [[Decisions]]
+- [x] Audio protocol message types added to `backend/protocol.rs` (`AudioEnd`, `Transcript`, `TtsEnd`)
+- [x] `whisper-rs` and `any-tts` added to `Cargo.toml`
+- [x] Fix tool implementations to capture stdout — `.status()` replaced with `.output()`, cross-platform via `#[cfg]`
 - [x] Phase 2 cleanup — dead code removed (`req_handler.rs` deleted, `OllamaMessage`/`ChatRequest` moved to `backend/ollama/types.rs`)
 - [x] Codebase restructured into `backend/`, `handlers/`, `tools/` modules
 - [x] Ollama URL moved from hardcoded constant to `.astra/astra.conf`

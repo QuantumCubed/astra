@@ -1,11 +1,22 @@
 ---
 created: 2026-06-13
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 
 # Progress
 
 [[ASTRA|← Home]]
+
+---
+
+## 2026-06-22 — Phase 2 Audio Pipeline Design
+
+- Designed audio pipeline architecture: server-side STT/TTS, in-process Rust libraries, raw PCM over binary WebSocket frames
+- Evaluated Kokoro TTS crates; selected `any-tts` v0.1.1 (Candle-based, pure-Rust phonemizer, no system deps, trait-based API) over alternatives (`kokoroxide` requires espeak-ng, `tts-rs` unclear streaming support)
+- Selected `whisper-rs` v0.16.0 (whisper.cpp via C FFI) for STT; rejected `faster-whisper-rs` (v0.1.0, 21 stars, calls Python API under the hood)
+- Added `whisper-rs` and `any-tts` to `Cargo.toml`; resolved Windows build dependency: LLVM/libclang required for whisper-rs bindgen step (installed via winget)
+- Added audio control message types to `backend/protocol.rs`: `AudioEnd`, `Transcript(TranscriptPayload)`, `TtsEnd`; binary WS frames carry raw PCM
+- Push-to-talk selected for utterance boundary signaling; VAD deferred as a client-side concern
 
 ---
 

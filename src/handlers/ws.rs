@@ -48,6 +48,10 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     }
                 }
             }
+
+            WsFrame::Binary()
+
+
             WsFrame::Close(_) => return,
             _ => {}
         }

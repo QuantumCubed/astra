@@ -28,14 +28,17 @@ pub struct ErrorPayload {
     pub message: String,
     pub code: String,
 }
-
-// Audio: handled as binary WebSocket frames, not JSON messages
-// Binary frames will be defined when Phase 3 is implemented
+#[derive(Serialize, Deserialize)]pub struct TranscriptPayload {
+    pub text: String
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum Message {
     TextMessage(TextMessagePayload),
+    AudioEnd,
+    Transcript(TranscriptPayload),
+    TtsEnd,
     TextChunk(TextChunkPayload),
     ToolCall(ToolCallPayload),
     ToolResult(ToolResultPayload),

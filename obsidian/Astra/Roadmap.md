@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-20
+updated: 2026-06-22
 ---
 
 # Roadmap
@@ -61,11 +61,38 @@ Error codes are deferred — defined when the full set of error cases is known.
 
 ---
 
-## Phase 2 — Tool Layer
+## Phase 2 — Voice Interface
+
+**Goal:** Real-time voice I/O over the existing WebSocket connection.
+
+**Why after Phase 1:** The WebSocket transport and conversational loop are the minimum needed to build on. Audio is a new message type over the same connection.
+
+### Architecture Decisions (resolved — see [[Decisions]])
+
+- **STT/TTS placement:** Server-side, in-process within the Astra binary
+- **STT:** `whisper-rs` v0.16.0 (whisper.cpp via C FFI)
+- **TTS:** `any-tts` v0.1.1 (Kokoro 82M via Candle, pure Rust)
+- **Audio transport:** Raw PCM binary WebSocket frames (not Opus). 16kHz in, 24kHz out.
+- **Utterance boundaries:** Push-to-talk — client sends `audio_end` JSON message
+
+### Tasks
+
+- [x] Decide STT/TTS placement and crate selection
+- [x] Define audio protocol message types (`AudioEnd`, `Transcript`, `TtsEnd`)
+- [x] Add `whisper-rs` and `any-tts` to `Cargo.toml`
+- [ ] Build `backend/audio/` module (`audio.rs`, `audio/stt.rs`, `audio/tts.rs`)
+- [ ] Handle binary WebSocket frames in `handlers/ws.rs`
+- [ ] Implement STT in `backend/audio/stt.rs`
+- [ ] Implement TTS in `backend/audio/tts.rs`
+- [ ] Stream TTS audio chunks back as binary frames
+- [ ] Voice activity detection — deferred; push-to-talk used initially
+- [ ] Interruption handling — user speaks while assistant is responding
+
+---
+
+## Phase 3 — Tool Layer
 
 **Goal:** Build tools that are actually useful for a home AI assistant.
-
-**Why after Phase 1:** Tools only matter once there is a real conversational interface to call them through.
 
 ### Tasks
 
@@ -74,35 +101,6 @@ Error codes are deferred — defined when the full set of error cases is known.
 - [ ] Implement first real tool (TBD — candidate: file read, web search, home automation command)
 - [ ] Structured tool error handling — tool failures should not crash the request
 - [ ] Tool result streaming — long-running tools should stream progress
-
----
-
-## Phase 3 — Voice Interface
-
-**Goal:** Real-time voice I/O over the existing WebSocket connection.
-
-**Why after Phase 2:** Voice makes no sense without a solid conversational loop underneath it. Phase 1 + 2 provide that.
-
-### Key Design Decision (pending)
-
-**Where does STT/TTS run?** This is the biggest latency decision in the entire project.
-
-| Option | Latency | Complexity |
-|---|---|---|
-| Client-side STT → send text | Low (no audio upload) | Client must do STT |
-| Server-side STT (Whisper) | Medium (audio upload) | Server owns full pipeline |
-| Client-side STT + server-side TTS | Mixed | Hybrid |
-
-A decision here should be logged to [[Decisions]] when made.
-
-### Tasks
-
-- [ ] Decide STT/TTS placement (see above)
-- [ ] Implement `audio_chunk` message handling in the WebSocket layer
-- [ ] Integrate STT model (Whisper or client-side alternative)
-- [ ] Integrate TTS model
-- [ ] Voice activity detection — know when the user has finished speaking
-- [ ] Interruption handling — user speaks while assistant is responding
 
 ---
 

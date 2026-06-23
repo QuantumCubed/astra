@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 
 # Architecture
@@ -76,9 +76,46 @@ Core is loaded first, user config appended after. Core uses hard constraint lang
 
 Hardware/runtime tuning (`num_ctx`, GPU offload, thread count) is managed via an Ollama Modelfile on the host machine and is outside Astra's scope.
 
+## WebSocket Protocol
+
+All text frames use a JSON envelope:
+
+```json
+{ "type": "<message_type>", "request_id": "<optional>", "payload": { ... } }
+```
+
+| Type | Direction | Notes |
+|---|---|---|
+| `text_message` | Client → Server | Text chat input |
+| `text_chunk` | Server → Client | Streaming LLM output; `done: true` = end of response |
+| `tool_call` | Server → Client | Tool dispatched by model |
+| `tool_result` | Server → Client | Tool output sent back to model |
+| `audio_end` | Client → Server | Signals end of mic audio (push-to-talk) |
+| `transcript` | Server → Client | STT result from Whisper |
+| `tts_end` | Server → Client | Signals end of TTS audio stream |
+| `error` | Server → Client | Error envelope |
+
+**Binary frames** carry raw PCM audio — no JSON wrapper. Incoming = mic audio (16kHz mono 16-bit); outgoing = TTS output (24kHz).
+
+## Audio Pipeline (Phase 2 — in progress)
+
+```
+binary WS frames (PCM chunks)
+    └── handle_socket detects binary frame
+            └── accumulate in audio buffer until AudioEnd JSON message
+                    └── backend::audio::stt (whisper-rs / whisper.cpp FFI)
+                            └── transcript text → run_agent_loop (existing)
+                                    └── LLM response text
+                                            └── backend::audio::tts (any-tts / Kokoro)
+                                                    └── stream PCM chunks as binary WS frames → client
+```
+
+**STT:** `whisper-rs` v0.16.0 — whisper.cpp via C FFI. Requires LLVM/libclang on Windows for the bindgen build step.
+**TTS:** `any-tts` v0.1.1 — Kokoro 82M via Candle (pure Rust, no system deps). Returns `Vec<f32>` PCM at 24kHz.
+
 ## Current Tools
 
 | Tool | Description |
 |---|---|
-| `echo_hello_world` | Runs `echo.sh` — prints "Hello, World!" |
-| `list_contents` | Runs `ls` in the working directory |
+| `echo_hello_world` | Echoes "Hello, World!" via shell command |
+| `list_contents` | Lists working directory contents |

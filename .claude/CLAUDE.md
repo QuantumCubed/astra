@@ -10,7 +10,7 @@ Astra is a home AI server — a local, low-latency AI assistant with voice, web,
 
 **Transport commitment:** all client-server communication is WebSocket. This is a firm architectural decision — do not suggest HTTP/SSE alternatives. Voice is added as a new message type over the same connection, not a migration.
 
-**Build order:** WebSocket text interface → real tool layer → voice → web client → agents. The current HTTP quickstart code is a placeholder and will be fully replaced in Phase 1.
+**Build order:** WebSocket text interface → voice interface → real tool layer → web client → agents. The current HTTP quickstart code is a placeholder and will be fully replaced in Phase 1.
 
 See `obsidian/Astra/` for the full project context: `Roadmap.md`, `Decisions.md`, `Architecture.md`, `Todos.md`, and `Progress.md`.
 

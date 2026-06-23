@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 
 # Decisions
@@ -114,6 +114,38 @@ A log of significant technical and architectural decisions, including the reason
 **Decision:** All modules use the Rust 2018+ named-file convention: `foo.rs` as the module root alongside a `foo/` directory for submodules. `mod.rs` is not used anywhere in the project.
 
 **Reasoning:** `mod.rs` was the Rust 2015 style. The 2018 convention is strictly better for navigation — module files have unique, meaningful names rather than a sea of `mod.rs` tabs. This is enforced by the rust-review skill and documented in `CLAUDE.md`.
+
+---
+
+## 2026-06-22 — Server-side audio pipeline with in-process Rust libraries
+
+**Decision:** STT and TTS both run server-side, in-process within the Astra Rust binary. STT uses `whisper-rs` (whisper.cpp via C FFI, v0.16.0). TTS uses `any-tts` with the Kokoro backend (Candle-based, pure Rust, v0.1.1).
+
+**Reasoning:** Server-side keeps the full pipeline under one process and avoids pushing STT complexity to clients. In-process was chosen over separate Python microservices because the Rust ecosystem is mature enough: `whisper-rs` is actively maintained (March 2026) and `any-tts` ships a pure-Rust phonemizer with no system espeak-ng dependency (April 2026). `any-tts` was chosen over `kokoroxide` (requires espeak-ng) and `tts-rs` (streaming support unclear) for its clean trait-based API and zero system dependencies. `faster-whisper-rs` was rejected: v0.1.0, 21 stars, calls the Python faster-whisper API under the hood — not truly in-process.
+
+---
+
+## 2026-06-22 — Raw PCM over binary WebSocket frames for audio transport
+
+**Decision:** Audio data (incoming mic audio and outgoing TTS) is transmitted as raw PCM over binary WebSocket frames. Opus compression is not used. Audio control messages (`AudioEnd`, `Transcript`, `TtsEnd`) remain as JSON text frames using the existing Envelope schema.
+
+**Reasoning:** On a home LAN, 16kHz mono 16-bit PCM is ~32KB/s — negligible bandwidth. Opus would add codec complexity on both ends (browser encoding, server decoding) for no practical gain locally. Binary frames are handled as a separate branch in the WebSocket frame loop; the text/binary split is clean and natively supported by Axum's WebSocket API.
+
+---
+
+## 2026-06-22 — Push-to-talk for utterance boundaries; VAD deferred
+
+**Decision:** Utterance end is signaled by an explicit client-sent `audio_end` JSON message (push-to-talk model). The server does not perform voice activity detection.
+
+**Reasoning:** VAD adds tuning surface (silence threshold, debounce timing, false-positive handling) with no benefit to the server protocol. Push-to-talk is deterministic and simple. VAD can be added client-side later without any server protocol changes — the server sees `audio_end` regardless of how the client decided to send it.
+
+---
+
+## 2026-06-22 — Audio message protocol: binary for PCM, JSON for control
+
+**Decision:** The audio portion of the WebSocket protocol uses two frame types: binary frames carry raw PCM samples (16kHz mono 16-bit in, 24kHz out); text frames carry JSON-enveloped control messages. Three new `Message` enum variants were added: `AudioEnd` (client → server, no payload), `Transcript(TranscriptPayload)` (server → client, STT result), `TtsEnd` (server → client, signals end of audio stream).
+
+**Reasoning:** Mixing PCM bytes into a JSON envelope via base64 adds 33% overhead and is semantically awkward. The natural split is: binary frame = audio data, text frame = everything else. The `Transcript` message lets the client display what Whisper heard before the LLM responds, which aids debugging and UX.
 
 ---
 
