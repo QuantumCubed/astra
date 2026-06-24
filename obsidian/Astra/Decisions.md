@@ -229,6 +229,23 @@ A log of significant technical and architectural decisions, including the reason
 
 **Reasoning:** `tts-rs` proved broken against all available `ort` rc versions: `rc.10` exposes `session.inputs` as a field but `tts-rs` calls it as a method; `rc.12` changed `SessionBuilder` error types to `Error<SessionBuilder>` and `tts-rs` doesn't implement the conversion. GitHub issue #1 is open and unresolved; the maintainer is unresponsive. `kokoro-tiny` explicitly targets `ort rc.12`, is actively maintained, has a native async `TtsEngine::new()`, and exposes a clean `engine.synthesize(&text, Some(&voice)) -> Result<Vec<f32>, String>` API. It uses espeak-ng (bundled statically via `espeak-rs-sys`, no system install required) for POS-aware phonemization — better pronunciation than `any-tts`'s built-in phonemizer. `Arc<Mutex<TtsEngine>>` is needed because `synthesize` takes `&mut self`.
 
+**Superseded by:** the any-tts / Qwen3-TTS switch below.
+
+---
+
+## 2026-06-23 — Switch TTS from kokoro-tiny back to any-tts (Qwen3-TTS backend)
+
+**Decision:** Replace `kokoro-tiny` with `any-tts v0.1.2` using `ModelType::Qwen3Tts` (not the `ModelType::Kokoro` backend used in the original any-tts integration). Keep the current branch's text-processing (`strip_markdown`, `split_sentences`) and the `voice_response` / `TtsEnd` protocol; rewrite only the synthesis layer. Supersedes the kokoro-tiny switch above.
+
+**Reasoning:** Both prior TTS paths failed for unrelated reasons — any-tts's *Kokoro* backend used a native-Rust phonemizer that malformed audio, and `kokoro-tiny` shipped a voicepack-indexing bug (`voice[0]` instead of `voice[len(tokens)]`) that produced gappy, mistimed audio (diagnosed 2026-06-23). Qwen3-TTS is end-to-end neural — no espeak/native phonemizer at all — so it sidesteps the entire phonemizer class of problems, is open-weight + locally runnable (no cloud dependency), and adds instruction-following and voice cloning. Verified against the any-tts 0.1.2 source: `ModelType::Qwen3Tts` is a real Candle backend and `TtsModel::synthesize(&self, …)` takes `&self`, so `Arc<dyn TtsModel>` replaces `Arc<Mutex<TtsEngine>>` (no mutex, concurrent synths possible).
+
+**Tradeoffs / consequences:**
+- **~20× model size, autoregressive:** Qwen3-TTS-1.7B vs Kokoro-82M. Higher time-to-first-audio; latency must be measured before full buildout.
+- **No streaming API:** any-tts only exposes whole-clip `synthesize`. To keep voice real-time, astra must stream per-sentence (synthesize each `split_sentences` chunk and send its own binary frame) instead of concatenating then sending once. This also dissolves the inter-clip concatenation seams.
+- **Revives WSL2-only dev builds:** any-tts (candle-kernels / esaxx-rs `/MT`) cannot link with whisper-rs (`/MD`) on native Windows MSVC — see the WSL2 decision above. The native-Windows dev convenience gained via kokoro-tiny's `ort` backend is lost.
+- **Revives the nested-runtime gotcha:** any-tts `load_model()` creates its own Tokio runtime → re-wrap in `spawn_blocking`. Sample rate is again model-derived (`tts_model.sample_rate()`), not a 24 kHz constant.
+- **VRAM on the 16 GB server is tight:** qwen3.5:9b + 1.7B TTS + Whisper ≈ 12–14 GB resident; keep the Whisper model small and watch peak usage.
+
 ---
 
 ## 2026-06-13 — Axum with shared `AppState` for tool registry

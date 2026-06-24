@@ -250,3 +250,13 @@ When you're already inside a Tokio async context (i.e., inside `#[tokio::main]`)
 In Rust, async is contagious: if a function you call is `async`, you must either `.await` it (which makes your function `async` too) or spawn it as a separate task. You cannot call an async function synchronously. This means initialization code that was previously `fn new() -> Self` must become `async fn new() -> Self` the moment any step in it — loading a model, opening a connection, resolving a hostname — becomes async. The practical implication is that `main.rs` (or wherever the struct is instantiated) must also be in an async context, which `#[tokio::main]` provides. Contrast this with CPU-bound blocking init (like whisper's model load), which stays synchronous and gets moved to `spawn_blocking` to avoid blocking the async executor.
 
 ---
+
+## The `tracing`/`log` Facade Is Silent Without a Subscriber
+
+**Date:** 2026-06-23
+**Context:** No download/progress output appeared at startup after switching TTS to `any-tts`, which logs via `tracing::info!`
+**Source:** Claude
+
+`tracing` (and the older `log` crate) is a *facade*: macros like `info!`, `warn!`, and `debug!` only do anything if a *subscriber* has been installed to consume the events they emit. With no subscriber, every macro call is a near-zero-cost no-op and the message is silently discarded — nothing reaches stdout or stderr. So a dependency that reports progress through `tracing::info!` (like any-tts logging its 4.5 GB model download) produces *no output at all* in an application that never calls something like `tracing_subscriber::fmt().init()`. This is why `println!`-based logging (kokoro-tiny's) was always visible but `tracing`-based logging is not: `println!` writes to stdout directly, while `tracing` routes through the subscriber layer that, here, didn't exist. Installing one subscriber once at startup makes all `tracing` output — from your own code and from your dependencies — visible.
+
+---

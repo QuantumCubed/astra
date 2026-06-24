@@ -4,14 +4,15 @@ use axum::{
 };
 use crate::{
     backend::{
-        audio::{stt::transcribe, tts::synthesize},
+        audio::{stt::transcribe, tts::{strip_markdown, synthesize_sentence, take_sentences}},
         conversation::Conversation,
         ollama::{client, types::ChatRequest},
-        protocol::{Envelope, ErrorPayload, Message, TextChunkPayload, TranscriptPayload, TtsEndPayload},
+        protocol::{Envelope, ErrorPayload, Message, TextChunkPayload, TranscriptPayload, TtsEndPayload, TtsStartPayload},
         state::AppState,
     },
     tools::dispatch,
 };
+use any_tts::TtsModel;
 use futures::StreamExt;
 
 pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
@@ -31,33 +32,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         match envelope.message {
                             Message::TextMessage(payload) => {
                                 conversation.add_user_turn(&payload.content);
-                                let response = run_agent_loop(&mut socket, &state, &mut conversation, request_id.clone()).await;
-                                if payload.voice_response {
-                                    match synthesize(state.tts.clone(), state.tts_voice.clone(), response).await {
-                                        Ok((samples, sample_rate)) => {
-                                            let bytes: Vec<u8> = samples
-                                                .iter()
-                                                .flat_map(|s| s.to_le_bytes())
-                                                .collect();
-                                            let _ = std::fs::write("debug_audio.raw", &bytes);
-                                            let _ = socket.send(WsFrame::Binary(bytes.into())).await;
-                                            let tts_end = Envelope {
-                                                request_id: request_id.clone(),
-                                                message: Message::TtsEnd(TtsEndPayload {
-                                                    sample_rate,
-                                                    channels: 1,
-                                                    format: "f32le".to_string(),
-                                                }),
-                                            };
-                                            if let Ok(s) = serde_json::to_string(&tts_end) {
-                                                let _ = socket.send(WsFrame::Text(s.into())).await;
-                                            }
-                                        }
-                                        Err(e) => {
-                                            send_error(&mut socket, request_id, "TTS_ERROR", &format!("TTS failed: {e}")).await;
-                                        }
-                                    }
-                                }
+                                run_agent_loop(
+                                    &mut socket,
+                                    &state,
+                                    &mut conversation,
+                                    request_id.clone(),
+                                    payload.voice_response,
+                                )
+                                .await;
                             }
                             Message::AudioEnd => {
                                 let audio = std::mem::take(&mut audio_buffer);
@@ -74,48 +56,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                         }
 
                                         conversation.add_user_turn(&transcript);
-                                        let response = run_agent_loop(
+                                        run_agent_loop(
                                             &mut socket,
                                             &state,
                                             &mut conversation,
                                             request_id.clone(),
+                                            true,
                                         )
                                         .await;
-
-                                        match synthesize(state.tts.clone(), state.tts_voice.clone(), response).await {
-                                            Ok((samples, sample_rate)) => {
-                                                let bytes: Vec<u8> = samples
-                                                    .iter()
-                                                    .flat_map(|s| s.to_le_bytes())
-                                                    .collect();
-                                                let _ = std::fs::write("debug_audio.raw", &bytes);
-                                                let _ = socket
-                                                    .send(WsFrame::Binary(bytes.into()))
-                                                    .await;
-                                                let tts_end = Envelope {
-                                                    request_id: request_id.clone(),
-                                                    message: Message::TtsEnd(TtsEndPayload {
-                                                        sample_rate,
-                                                        channels: 1,
-                                                        format: "f32le".to_string(),
-                                                    }),
-                                                };
-                                                if let Ok(s) = serde_json::to_string(&tts_end) {
-                                                    let _ = socket
-                                                        .send(WsFrame::Text(s.into()))
-                                                        .await;
-                                                }
-                                            }
-                                            Err(e) => {
-                                                send_error(
-                                                    &mut socket,
-                                                    request_id,
-                                                    "TTS_ERROR",
-                                                    &format!("TTS failed: {e}"),
-                                                )
-                                                .await;
-                                            }
-                                        }
                                     }
                                     Err(e) => {
                                         send_error(
@@ -169,12 +117,83 @@ async fn send_error(socket: &mut WebSocket, request_id: Option<String>, code: &s
     }
 }
 
+/// Strip markdown from one sentence, synthesize it, and stream the audio frame.
+///
+/// `TtsStart` (carrying the audio format) is sent lazily before the first chunk so
+/// the client can configure playback; samples are also accumulated into `all_samples`
+/// for the `debug_audio.raw` dump written once the turn ends. Called inline as each
+/// sentence completes, so audio streams alongside the still-arriving text.
+async fn speak_sentence(
+    socket: &mut WebSocket,
+    state: &AppState,
+    request_id: &Option<String>,
+    sentence: &str,
+    tts_started: &mut bool,
+    all_samples: &mut Vec<f32>,
+) {
+    let text = strip_markdown(sentence);
+    if text.is_empty() {
+        return;
+    }
+
+    if !*tts_started {
+        let start = Envelope {
+            request_id: request_id.clone(),
+            message: Message::TtsStart(TtsStartPayload {
+                sample_rate: state.tts.sample_rate(),
+                channels: 1,
+                format: "f32le".to_string(),
+            }),
+        };
+        if let Ok(s) = serde_json::to_string(&start) {
+            let _ = socket.send(WsFrame::Text(s.into())).await;
+        }
+        *tts_started = true;
+    }
+
+    let started = std::time::Instant::now();
+    match synthesize_sentence(
+        state.tts.clone(),
+        state.tts_voice.clone(),
+        text,
+        state.tts_max_tokens,
+    )
+    .await
+    {
+        Ok(samples) => {
+            if samples.is_empty() {
+                return;
+            }
+            let synth_s = started.elapsed().as_secs_f32();
+            let audio_s = samples.len() as f32 / state.tts.sample_rate() as f32;
+            tracing::info!(
+                "TTS: {audio_s:.1}s audio in {synth_s:.1}s (RTF {:.2})",
+                synth_s / audio_s.max(0.01)
+            );
+            let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+            all_samples.extend_from_slice(&samples);
+            let _ = socket.send(WsFrame::Binary(bytes.into())).await;
+        }
+        Err(e) => {
+            send_error(socket, request_id.clone(), "TTS_ERROR", &format!("TTS failed: {e}")).await;
+        }
+    }
+}
+
 async fn run_agent_loop(
     socket: &mut WebSocket,
     state: &AppState,
     conversation: &mut Conversation,
     request_id: Option<String>,
-) -> String {
+    voice_response: bool,
+) {
+    // TTS streaming state, carried across tool-call iterations so the audio spans the
+    // whole turn. We synthesize each sentence the moment it completes (inline), so
+    // audio for earlier sentences plays while later text is still streaming in.
+    let mut unspoken = String::new();
+    let mut tts_started = false;
+    let mut all_samples: Vec<f32> = Vec::new();
+
     loop {
         let req = ChatRequest {
             model: "qwen3.5:9b".to_string(),
@@ -183,11 +202,13 @@ async fn run_agent_loop(
             tools: state.tools.clone(),
         };
 
+        let llm_started = std::time::Instant::now();
         if let Ok(res) = client::chat(&state.client, &state.ollama_url, req).await {
             let mut stream = res.bytes_stream();
             let mut line_buf = String::new();
             let mut full_content = String::new();
             let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+            let mut first_token = true;
 
             while let Some(Ok(chunk)) = stream.next().await {
                 line_buf.push_str(&String::from_utf8_lossy(&chunk));
@@ -203,6 +224,14 @@ async fn run_agent_loop(
                         let token = json["message"]["content"].as_str().unwrap_or("");
                         let done = json["done"].as_bool().unwrap_or(false);
 
+                        if first_token && !token.is_empty() {
+                            tracing::info!(
+                                "LLM first token in {:.1}s",
+                                llm_started.elapsed().as_secs_f32()
+                            );
+                            first_token = false;
+                        }
+
                         full_content.push_str(token);
 
                         if !token.is_empty() || done {
@@ -217,9 +246,33 @@ async fn run_agent_loop(
                                 let _ = socket.send(WsFrame::Text(json_str.into())).await;
                             }
                         }
+
+                        // Interleave: speak each sentence as soon as it forms. Synthesis
+                        // blocks reading the next token, but ollama buffers in the
+                        // meantime, so no text is lost — it just catches up after.
+                        if voice_response && !token.is_empty() {
+                            unspoken.push_str(token);
+                            for sentence in take_sentences(&mut unspoken) {
+                                speak_sentence(
+                                    socket,
+                                    state,
+                                    &request_id,
+                                    &sentence,
+                                    &mut tts_started,
+                                    &mut all_samples,
+                                )
+                                .await;
+                            }
+                        }
                     }
                 }
             }
+
+            tracing::info!(
+                "LLM streamed {} chars in {:.1}s",
+                full_content.len(),
+                llm_started.elapsed().as_secs_f32()
+            );
 
             if !tool_calls.is_empty() {
                 conversation.add_astra_tool_call(tool_calls.clone());
@@ -234,12 +287,47 @@ async fn run_agent_loop(
                 continue;
             } else {
                 conversation.add_astra_turn(&full_content);
-                return full_content;
+                break;
             }
         }
 
         break;
     }
 
-    String::new()
+    if !voice_response {
+        return;
+    }
+
+    // Speak any trailing partial sentence (the final chunk often has no terminator),
+    // then close the audio stream and dump the full utterance for offline inspection.
+    let tail = unspoken.trim().to_string();
+    if !tail.is_empty() {
+        speak_sentence(
+            socket,
+            state,
+            &request_id,
+            &tail,
+            &mut tts_started,
+            &mut all_samples,
+        )
+        .await;
+    }
+
+    if tts_started {
+        // ffplay -f f32le -ar <sample_rate> -ac 1 debug_audio.raw
+        let dump: Vec<u8> = all_samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let _ = std::fs::write("debug_audio.raw", &dump);
+
+        let end = Envelope {
+            request_id: request_id.clone(),
+            message: Message::TtsEnd(TtsEndPayload {
+                sample_rate: state.tts.sample_rate(),
+                channels: 1,
+                format: "f32le".to_string(),
+            }),
+        };
+        if let Ok(s) = serde_json::to_string(&end) {
+            let _ = socket.send(WsFrame::Text(s.into())).await;
+        }
+    }
 }

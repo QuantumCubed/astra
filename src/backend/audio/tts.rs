@@ -1,70 +1,84 @@
-use std::sync::{Arc, Mutex};
-use kokoro_tiny::TtsEngine;
+use std::sync::Arc;
+use any_tts::{DeviceSelection, ModelType, SynthesisRequest, TtsConfig, TtsModel, load_model};
 
-pub async fn load_tts_engine() -> anyhow::Result<Arc<Mutex<TtsEngine>>> {
-    let engine = TtsEngine::new()
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to load Kokoro model: {e}"))?;
-    Ok(Arc::new(Mutex::new(engine)))
+/// Load the Qwen3-TTS model via any-tts.
+///
+/// Blocking: on the first run this downloads ~4.5 GB of weights from HuggingFace,
+/// and any-tts may spin up its own runtime internally while loading. Callers must
+/// invoke this inside `spawn_blocking`.
+pub fn load_tts_model(model_id: Option<String>) -> anyhow::Result<Arc<dyn TtsModel>> {
+    // `Auto` selects CUDA → Metal → CPU; dtype defaults to BF16 on GPU.
+    let mut config = TtsConfig::new(ModelType::Qwen3Tts).with_device(DeviceSelection::Auto);
+    // Override the default 1.7B with e.g. `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` for
+    // lower latency (same architecture, fewer params, same CustomVoice timbres).
+    if let Some(id) = model_id {
+        config = config.with_hf_model_id(id);
+    }
+    let model = load_model(config)
+        .map_err(|e| anyhow::anyhow!("failed to load Qwen3-TTS model: {e}"))?;
+    tracing::info!("TTS voices available: {:?}", model.supported_voices());
+    Ok(Arc::from(model))
 }
 
-pub async fn synthesize(
-    tts: Arc<Mutex<TtsEngine>>,
-    voice: String,
-    text: String,
-) -> anyhow::Result<(Vec<f32>, u32)> {
-    let text = strip_markdown(&text);
-    tokio::task::spawn_blocking(move || {
-        let mut engine = tts
-            .lock()
-            .map_err(|_| anyhow::anyhow!("TTS engine lock poisoned"))?;
-        let mut all_samples = Vec::new();
-        for sentence in split_sentences(&text) {
-            let samples = engine
-                .synthesize(&sentence, Some(&voice))
-                .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {e}"))?;
-            all_samples.extend(samples);
+/// Drain complete sentences from a streaming text buffer, leaving any trailing
+/// partial sentence in `buf`. A sentence is complete once a `.`/`!`/`?` is followed
+/// by whitespace (so we've seen past the boundary), which lets the caller synthesize
+/// each sentence the moment it forms instead of waiting for the whole response.
+pub fn take_sentences(buf: &mut String) -> Vec<String> {
+    let mut sentences = Vec::new();
+    loop {
+        let bytes = buf.as_bytes();
+        let mut boundary = None;
+        for i in 0..bytes.len() {
+            if matches!(bytes[i], b'.' | b'!' | b'?')
+                && bytes.get(i + 1).is_some_and(|b| b.is_ascii_whitespace())
+            {
+                boundary = Some(i + 1);
+                break;
+            }
         }
-        Ok((all_samples, 24000u32))
+        match boundary {
+            // `i + 1` falls on an ASCII whitespace byte, so both slices land on char
+            // boundaries even when the sentence contains multi-byte UTF-8.
+            Some(idx) => {
+                let sentence = buf[..idx].trim().to_string();
+                *buf = buf[idx..].trim_start().to_string();
+                if !sentence.is_empty() {
+                    sentences.push(sentence);
+                }
+            }
+            None => break,
+        }
+    }
+    sentences
+}
+
+/// Synthesize one chunk of text into f32 PCM at the model's native sample rate.
+///
+/// Qwen3-TTS is autoregressive, so synthesis is a heavy blocking call that runs
+/// on a blocking thread. The caller streams the returned samples per chunk.
+/// `max_tokens` caps generated codec tokens to bound latency and VRAM (any-tts's
+/// model default is 2048 ≈ ~170s of audio, far more than a sentence needs).
+pub async fn synthesize_sentence(
+    tts: Arc<dyn TtsModel>,
+    voice: String,
+    sentence: String,
+    max_tokens: usize,
+) -> anyhow::Result<Vec<f32>> {
+    tokio::task::spawn_blocking(move || {
+        let request = SynthesisRequest::new(sentence)
+            .with_language("en")
+            .with_voice(voice)
+            .with_max_tokens(max_tokens);
+        let audio = tts
+            .synthesize(&request)
+            .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {e}"))?;
+        Ok(audio.samples)
     })
     .await?
 }
 
-fn split_sentences(text: &str) -> Vec<String> {
-    let mut sentences = Vec::new();
-    let mut start = 0;
-    let bytes = text.as_bytes();
-
-    for i in 0..bytes.len() {
-        if matches!(bytes[i], b'.' | b'!' | b'?')
-            && (i + 1 == bytes.len() || bytes[i + 1] == b' ')
-        {
-            let s = text[start..=i].trim().to_string();
-            if !s.is_empty() {
-                sentences.push(s);
-            }
-            start = (i + 2).min(bytes.len());
-        }
-    }
-
-    if start < text.len() {
-        let s = text[start..].trim().to_string();
-        if !s.is_empty() {
-            sentences.push(s);
-        }
-    }
-
-    if sentences.is_empty() {
-        let s = text.trim().to_string();
-        if !s.is_empty() {
-            sentences.push(s);
-        }
-    }
-
-    sentences
-}
-
-fn strip_markdown(text: &str) -> String {
+pub fn strip_markdown(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_fence = false;
 
