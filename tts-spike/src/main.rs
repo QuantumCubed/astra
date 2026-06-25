@@ -16,9 +16,9 @@ use std::time::Instant;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t = Instant::now();
-    // args: (model_dir, quant, n_threads). n_threads is unused; "none" is the README's
-    // default quant — if RTF comes out high, try a GGUF quant like "Q5_K_M" or "Q4_K_M".
-    let mut engine = TtsEngine::new("models", "none", 0).await?;
+    // args: (model_dir, quant, n_threads). "none" = F16 talker (RTF ~1.2 on Vulkan);
+    // "Q5_K_M" is the benchmark's realtime config (~0.55 on CUDA). n_threads unused.
+    let mut engine = TtsEngine::new("models", "Q5_K_M", 0).await?;
     println!("engine loaded in {:.1}s", t.elapsed().as_secs_f32());
 
     // If this errors with "file not found", list ./speakers after the first run to see
