@@ -1,0 +1,16 @@
+# Throwaway spike (Step 0 of the Qwen3-TTS-Rust migration plan) — NOT part of astra.
+# Isolated on purpose: validates that qwen3-tts builds + hits RTF < 1 on this machine
+# without entangling the candle/any-tts/whisper build. Delete once it has served its purpose.
+[package]
+name = "tts-spike"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Vulkan GPU backend — libggml-vulkan.so already shipped in the runtime/ tarball, so we can
+# reach the 3070 without a CUDA-from-source build. (CPU RTF was ~4.0 — too slow.)
+qwen3-tts = { git = "https://github.com/cgisky1980/Qwen3-TTS-Rust", features = ["vulkan"] }
+tokio = { version = "1", features = ["full"] }
+# qwen3-tts pins ort ^2.0.0-rc.11, but newer rc's changed SessionBuilder::commit_from_file
+# to &mut self, which breaks the crate's onnx.rs. Force the rc it was written against.
+ort = "=2.0.0-rc.11"

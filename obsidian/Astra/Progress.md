@@ -1,11 +1,65 @@
 ---
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-06-25
 ---
 
 # Progress
 
 [[ASTRA|← Home]]
+
+---
+
+## 2026-06-25 — Streaming TTS + transcript synced to audio; web client playback
+
+- **Sub-sentence streaming (server):** `synthesize_sentence` → `synthesize_sentence_streaming` — drives the crate's `generate_with_voice_streaming` with a `tokio::mpsc` channel, forwarding each decoded PCM chunk (~every 4 frames ≈ 320 ms) to the client as its own binary frame from inside `spawn_blocking`. Added a chunk-count + first-chunk-latency to the RTF log to prove streaming. Added `[profile.dev.package."*"] opt-level = 3` so dev builds aren't the RTF-8 trap.
+- **Transcript sync:** new `tts_sentence` protocol message (the spoken/stripped text) sent before each sentence's chunks. Time-to-first-audio dropped from ~4 s (whole sentence) to a few hundred ms.
+- **Web client (`astra-web`, React/TS):** rewrote `audio/playback.ts` as a Web Audio **scheduling cursor** (`startTtsStream`/`enqueueChunk`/`endTtsStream`) — chunks play gapless, back-to-back, as they arrive; `context/ws.tsx` plays each binary frame on arrival and reveals each sentence's text via a timer set to its scheduled play time; dropped the old buffer-all-then-play-at-`tts_end` path; `useAudio.ts` mirrors playback state from `speakingId`. Confirmed working end-to-end ("works great").
+- **Found (deferred):** the mic button does nothing over plain-HTTP LAN — `navigator.mediaDevices.getUserMedia` requires a secure context (HTTPS or `localhost`), and `startRecording`'s silent `catch` hid the failure. Not caused by the TTS work (recording logic unchanged). Fix later via HTTPS / localhost.
+
+---
+
+## 2026-06-25 — TTS → Qwen3-TTS-Rust crate; realtime (RTF 0.80) on the server
+
+- Migrated TTS from `any-tts` (Candle, RTF ~2.5) to the **`cgisky1980/Qwen3-TTS-Rust`** crate — same model family as GGUF via llama.cpp (Vulkan) + ONNX decoder. Git dep pinned to a rev; `ort` pinned `=2.0.0-rc.11`; `features=["vulkan"]`.
+- De-risked with an isolated spike first (`tts-spike/`) before touching astra: confirmed it builds, runs on the server's RTX 5060 Ti via Vulkan, and clears RTF < 1.
+- Rewrote the synthesis layer: `AppState.tts` `Arc<dyn TtsModel>` → `Arc<Mutex<TtsEngine>>` (`generate_with_voice` takes `&mut self`); `load_tts_model` is async (awaited directly — the crate's `new` is genuinely async, no nested-runtime trap); `synthesize_sentence` runs in `spawn_blocking` holding the std mutex; speaker is `Arc<VoiceFile>` loaded once. `TTS_SAMPLE_RATE` const (24 kHz) replaces the model accessor.
+- Config: `TTS_QUANT` (none|q5_k_m|q8_0) replaces `TTS_DTYPE`/`TTS_MODEL_ID`; `TTS_MAX_TOKENS` → `set_max_steps`. Native libs dlopen'd from `./runtime` (CWD); models in `.astra/models/tts/`, speakers in `.astra/models/tts/speakers/`.
+- **Verified on the server: RTF 0.80** (5.0 s audio in 4.0 s) with whisper (CUDA) + the resident Ollama 9B (CUDA) sharing the GPU — the three native stacks coexist in one process cleanly.
+- **Hard-won lesson:** a debug build runs at RTF ~8; `--release` drops it to ~0.8. The per-frame hot path is the crate's *own Rust* (projection, sampling, ONNX marshalling), which debug-mode pessimizes ~10× and starves the GPU. Added `[profile.dev.package."*"] opt-level = 3`. The mid-debug CUDA/Vulkan-contention theory was wrong — coexistence is fine.
+- Findings: quantization barely moves RTF here (talker isn't memory-bound) but Q5 saves ~1.7 GB VRAM; the crate's GPU ONNX path is DirectML/Windows-only (Linux decode is CPU, but not the bottleneck); the crate exposes a streaming API (`generate_with_voice_streaming`) — next up for time-to-first-audio.
+
+---
+
+## 2026-06-24 — TTS migrated to any-tts/Qwen3-TTS; latency tuning
+
+- Diagnosed the kokoro-tiny gappy-audio root cause: its `load_voices` hardcodes `voicepack[0]` instead of `voice[len(tokens)]` — wrong style vector → bad durations. Verified against reference `thewh1teagle/kokoro-onnx`.
+- Migrated TTS from `kokoro-tiny` to **`any-tts v0.1.2`** with `ModelType::Qwen3Tts` (Qwen3-TTS-1.7B-CustomVoice). `AppState.tts`: `Arc<Mutex<TtsEngine>>` → `Arc<dyn TtsModel>` (synthesize takes `&self`). Load wrapped in `spawn_blocking` (any-tts's nested runtime). Cargo: `kokoro-tiny` → `any-tts` (`default-features=false`, `qwen3-tts`/`download`/`cuda`); added `tracing` + `tracing-subscriber`.
+- Renamed `KOKORO_VOICE` → `TTS_VOICE`; added runtime knobs `TTS_MAX_TOKENS`, `TTS_MODEL_ID`, `TTS_DTYPE` (tune model/dtype/length via `astra.conf` + restart, no slow candle rebuild).
+- Added `TtsStart(TtsStartPayload)` to the protocol — audio format sent before the first chunk so the client can configure playback.
+- Built per-sentence streaming → inline interleave (synthesize each sentence as it streams), then **temporarily reverted to whole-clip** synthesis to isolate latency measurements (`take_sentences`/`speak_sentence` kept for restore).
+- Added observability: `tracing_subscriber` in `main.rs`; model-load timing, per-synth **RTF** logging, LLM first-token/streamed timing.
+- **Key finding:** Qwen3-TTS-1.7B runs at **RTF ~2.4–2.8** on the dev RTX 3070 — too slow for realtime streaming (synthesis can't keep pace with playback). EOS fires correctly (not over-generation); LLM is fast (~1.4 s first token).
+- Investigated the "Candle fp32 fallback" hypothesis — **disproven**: any-tts runs BF16 on CUDA. OOM is tight-8 GB-margin, not 2× bloat.
+- Confirmed any-tts has **no streaming synthesis API** (whole-clip only; Qwen3-TTS streaming exists in the model but the binding hardcodes non-streaming).
+- Path forward: `TTS_DTYPE=f16` A/B → smaller/faster model → non-autoregressive (Kokoro) if RTF stays > 1; streaming deferred.
+
+---
+
+## 2026-06-23 — TTS Library Migration Complete (kokoro-tiny)
+
+- Tested TTS output with `any-tts`; identified mispronounced words ("astra", "assistant", "object" as heteronym) — root cause: in-tree pure-Rust phonemizer has limited dictionary and no POS awareness
+- Added `strip_markdown()` to `tts.rs` — strips `**`, `*`, `_`, `` ` ``, `#`, `>`, `- `, `1. `, `[text](url)` and code fences before phonemization; eliminates symbol noise in speech output
+- Attempted `kokoroxide v0.1.5` — broken: all `ort ^1.16` versions yanked; crate unmaintained
+- Attempted `tts-rs v2026.2.1` — broken against all available `ort` rc versions: rc.10 has `session.inputs` as a field (tts-rs calls it as a method); rc.12 changed `SessionBuilder` error types (open issue #1, maintainer unresponsive)
+- Switched to `kokoro-tiny v0.1.0`: native async `TtsEngine::new()`, espeak-ng phonemizer (bundled statically via `espeak-rs-sys`, no system install), `cuda` feature, auto-downloads models to `~/.cache/k/`
+- Rewrote `tts.rs`: `load_tts_engine()` (async, returns `Arc<Mutex<TtsEngine>>`), `synthesize()` (offloads to `spawn_blocking`), `strip_markdown()`
+- Rewrote `state.rs`: `AppState::new()` is now `async fn`; `tts: Arc<Mutex<TtsEngine>>`; whisper loading still in its own `spawn_blocking`; removed `tts_sample_rate` field
+- Updated `main.rs`: dropped `spawn_blocking` wrapper — `AppState::new().await` directly
+- Simplified `config.rs`: removed `load_tts_model_path()`, `load_tts_voices_path()`, `load_kokoro_tokenizer_path()`; only `OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `KOKORO_VOICE` keys remain
+- Updated `Cargo.toml`: removed `kokoroxide`, `ort` pin; added `kokoro-tiny = { version = "0.1.0", features = ["cuda"] }`
+- Updated `.astra/astra.conf`: removed `KOKORO_MODEL` and `KOKORO_TOKENIZER` keys; `KOKORO_VOICE=af_heart` retained
+- Added webfetch reliability rule to `.claude/rules/webfetch.md` — prefer raw source over READMEs; treat WebFetch signatures as hypotheses; compiler errors override fetched claims
+- Updated memory: `project_tts_library.md` documents full TTS crate landscape with reasons for each decision
 
 ---
 

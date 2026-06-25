@@ -43,11 +43,25 @@ pub struct TtsEndPayload {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct TtsStartPayload {
+    pub sample_rate: u32,
+    pub channels: u8,
+    pub format: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TtsSentencePayload {
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum Message {
     TextMessage(TextMessagePayload),
     AudioEnd,
     Transcript(TranscriptPayload),
+    TtsStart(TtsStartPayload),
+    TtsSentence(TtsSentencePayload),
     TtsEnd(TtsEndPayload),
     TextChunk(TextChunkPayload),
     ToolCall(ToolCallPayload),

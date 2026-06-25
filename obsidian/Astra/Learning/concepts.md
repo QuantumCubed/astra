@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-06-25
 ---
 
 # Concepts
@@ -238,5 +238,75 @@ When you're already inside a Tokio async context (i.e., inside `#[tokio::main]`)
 **Source:** Claude
 
 `tokio::task::spawn_blocking` requires its closure to be `'static` — meaning it cannot hold any references that borrow from the current stack frame, because the closure will run on a separate thread that may outlive the current one. A `&str` is a borrowed reference with a lifetime tied to its source; it is not `'static` unless the source is a string literal baked into the binary. The idiomatic fix is to call `.to_string()` on the `&str` before constructing the closure, converting it into an owned `String` that the closure can take by value (`move`). Inside the closure, you can then re-borrow the `String` as `&str` safely, because the `String` is owned by the closure itself.
+
+---
+
+## Async Initialization Propagates Up the Call Stack
+
+**Date:** 2026-06-23
+**Context:** Switching TTS to `kokoro-tiny`, whose `TtsEngine::new()` is an `async fn`, requiring `AppState::new()` to also become `async`
+**Source:** Claude
+
+In Rust, async is contagious: if a function you call is `async`, you must either `.await` it (which makes your function `async` too) or spawn it as a separate task. You cannot call an async function synchronously. This means initialization code that was previously `fn new() -> Self` must become `async fn new() -> Self` the moment any step in it — loading a model, opening a connection, resolving a hostname — becomes async. The practical implication is that `main.rs` (or wherever the struct is instantiated) must also be in an async context, which `#[tokio::main]` provides. Contrast this with CPU-bound blocking init (like whisper's model load), which stays synchronous and gets moved to `spawn_blocking` to avoid blocking the async executor.
+
+---
+
+## The `tracing`/`log` Facade Is Silent Without a Subscriber
+
+**Date:** 2026-06-23
+**Context:** No download/progress output appeared at startup after switching TTS to `any-tts`, which logs via `tracing::info!`
+**Source:** Claude
+
+`tracing` (and the older `log` crate) is a *facade*: macros like `info!`, `warn!`, and `debug!` only do anything if a *subscriber* has been installed to consume the events they emit. With no subscriber, every macro call is a near-zero-cost no-op and the message is silently discarded — nothing reaches stdout or stderr. So a dependency that reports progress through `tracing::info!` (like any-tts logging its 4.5 GB model download) produces *no output at all* in an application that never calls something like `tracing_subscriber::fmt().init()`. This is why `println!`-based logging (kokoro-tiny's) was always visible but `tracing`-based logging is not: `println!` writes to stdout directly, while `tracing` routes through the subscriber layer that, here, didn't exist. Installing one subscriber once at startup makes all `tracing` output — from your own code and from your dependencies — visible.
+
+---
+
+## Realtime Factor (RTF) & Autoregressive TTS Latency
+
+**Date:** 2026-06-24
+**Context:** Diagnosing why Qwen3-TTS felt slow as a streaming voice backend
+**Source:** Claude
+
+Realtime factor (RTF) = synthesis time ÷ audio duration. RTF < 1 means you generate audio faster than it plays; RTF > 1 means you can't keep up. For *streaming* voice this is a hard gate: at RTF > 1 the player drains its buffer faster than the synthesizer refills it, so audio stalls mid-utterance no matter how cleverly you chunk or interleave — interleaving only changes *when* the first audio arrives, not the sustained generation rate. Autoregressive TTS (like Qwen3-TTS) is especially prone to RTF > 1 on modest GPUs because it generates audio codec tokens one at a time, sequentially, so wall-clock cost scales with output length and the parameter count understates it (a "1.7B" autoregressive model can be far slower than a 1.7B one-shot forward pass). The fix for RTF > 1 is fundamentally a faster model or faster hardware — not a software pipeline change.
+
+---
+
+## Debug vs Release: the Optimization Cliff for Compute-Heavy Code
+
+**Date:** 2026-06-25
+**Context:** Astra's TTS ran at RTF ~8 under `cargo run`, but RTF ~0.8 under `cargo run --release` — an 8× gap
+**Source:** Claude
+
+Rust's default (`dev`) profile compiles at `opt-level = 0`: no inlining, no SIMD/autovectorization, and full bounds-checking. For ordinary glue code the difference is invisible, but for tight numeric loops it's routinely 10×+ slower than the `release` profile (`opt-level = 3`). The trap with GPU work is indirect: even when the heavy matmuls run on the GPU, the *per-step CPU glue* (here: a projection matmul, a softmax/penalty sampler over thousands of logits, tensor marshalling) runs in your compiled Rust — and if that glue is unoptimized, the GPU sits idle waiting for the CPU to feed it the next step, so the whole pipeline crawls. Two fixes: always benchmark/deploy with `--release`; and add `[profile.dev.package."*"] opt-level = 3` to `Cargo.toml` to optimize *dependencies* in dev builds while keeping your own crate unoptimized (fast to compile, still debuggable) — ideal when the hot path lives in a dependency.
+
+---
+
+## Coexisting Native Runtimes in One Process (and why Rust usually saves you)
+
+**Date:** 2026-06-25
+**Context:** Whether whisper-rs (static whisper.cpp + CUDA) and qwen3-tts (dlopen'd llama.cpp + Vulkan) — two copies of ggml — would clash in one binary
+**Source:** Claude
+
+Linking two libraries that each bundle their own copy of a C library (here, ggml) raises the spectre of symbol interposition: at load time the dynamic linker might resolve one library's internal calls to the *other's* symbols, mixing incompatible versions. In practice a Rust binary usually avoids this because it does **not** export the symbols of its statically-linked C dependencies into its dynamic symbol table by default (no `-rdynamic`). So whisper's ggml symbols stay private to the executable, and qwen3-tts's `dlopen`'d `libggml.so` resolves its own symbols internally — the two ggml's live in separate worlds and never interpose. A separate, GPU-level concern is mixing **CUDA and Vulkan** compute on one NVIDIA card; that turned out fine here (no measurable contention), but it's worth verifying empirically rather than assuming, since the driver manages them as distinct clients.
+
+---
+
+## Streaming Results Out of `spawn_blocking` via a Channel
+
+**Date:** 2026-06-25
+**Context:** Forwarding TTS PCM chunks to the WebSocket as they're decoded, from inside a blocking synthesis call
+**Source:** Claude
+
+`spawn_blocking` normally hands back a single value when its closure finishes — fine for "compute one thing," but useless when a long blocking call produces output *incrementally* and you want to forward it as it appears. The pattern is to give the blocking closure the sender half of a `tokio::sync::mpsc` channel; the closure (on a blocking thread) sends each piece as it's produced, while the async side `recv().await`s them concurrently and acts on each. A `tokio` `UnboundedSender` can be sent to from any thread, including a non-async one, so it bridges blocking-world output into the async runtime without waiting for the whole job to finish. You still keep the returned `JoinHandle` to await completion and surface errors once the stream drains.
+
+---
+
+## Gapless Streaming Audio with a Web Audio Scheduling Cursor
+
+**Date:** 2026-06-25
+**Context:** Playing TTS PCM chunks in the browser as they stream in, instead of buffering and playing one blob
+**Source:** Claude
+
+Calling `source.start()` with no argument plays "now," so firing it per chunk as chunks arrive makes them overlap or gap — there's no shared timeline. The fix is a *scheduling cursor*: keep a `nextStartTime`, and for each chunk create an `AudioBufferSourceNode` and `start(nextStartTime)`, then advance `nextStartTime += buffer.duration`. That schedules chunks exactly back-to-back on the AudioContext's high-resolution clock, gapless, even though they arrive at irregular times. Guard with `start(max(nextStartTime, currentTime))` so a buffer underrun (the cursor falling behind real time) restarts at "now" instead of scheduling in the past. The same clock lets you sync *other* events to the audio — e.g. revealing a sentence's transcript via a timer set to that chunk's scheduled start time.
 
 ---

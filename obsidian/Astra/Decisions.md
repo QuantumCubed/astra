@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-06-25
 ---
 
 # Decisions
@@ -127,9 +127,9 @@ A log of significant technical and architectural decisions, including the reason
 
 ## 2026-06-22 — Server-side audio pipeline with in-process Rust libraries
 
-**Decision:** STT and TTS both run server-side, in-process within the Astra Rust binary. STT uses `whisper-rs` (whisper.cpp via C FFI, v0.16.0). TTS uses `any-tts` with the Kokoro backend (Candle-based, pure Rust, v0.1.1).
+**Decision:** STT and TTS both run server-side, in-process within the Astra Rust binary. STT uses `whisper-rs` (whisper.cpp via C FFI, v0.16.0). TTS uses `kokoro-tiny` v0.1.0 (espeak-ng phonemizer, ONNX Runtime via `ort` rc.12, `cuda` feature enabled).
 
-**Reasoning:** Server-side keeps the full pipeline under one process and avoids pushing STT complexity to clients. In-process was chosen over separate Python microservices because the Rust ecosystem is mature enough: `whisper-rs` is actively maintained (March 2026) and `any-tts` ships a pure-Rust phonemizer with no system espeak-ng dependency (April 2026). `any-tts` was chosen over `kokoroxide` (requires espeak-ng) and `tts-rs` (streaming support unclear) for its clean trait-based API and zero system dependencies. `faster-whisper-rs` was rejected: v0.1.0, 21 stars, calls the Python faster-whisper API under the hood — not truly in-process.
+**Reasoning:** Server-side keeps the full pipeline under one process and avoids pushing STT complexity to clients. In-process was chosen over separate Python microservices because the Rust ecosystem is mature enough. `faster-whisper-rs` was rejected: v0.1.0, 21 stars, calls the Python faster-whisper API under the hood — not truly in-process. TTS went through several iterations (`any-tts`, `kokoroxide`, `tts-rs`) before settling on `kokoro-tiny`; see the 2026-06-23 TTS library decision entries for the full history.
 
 ---
 
@@ -171,6 +171,16 @@ A log of significant technical and architectural decisions, including the reason
 
 **Reasoning:** `any-tts`'s `load_model()` internally creates its own `tokio::runtime::Runtime`. When this runtime is dropped inside an existing async context (i.e., inside `#[tokio::main]`), Tokio panics with "Cannot drop a runtime in a context where blocking is not allowed." Wrapping the call in `spawn_blocking` moves it onto a thread outside the async runtime's blocking-prohibition zone, which allows the nested runtime to be created and dropped safely.
 
+**Superseded by:** 2026-06-23 — `AppState::new()` made async after switch to kokoro-tiny (below).
+
+---
+
+## 2026-06-23 — `AppState::new()` made async; `spawn_blocking` wrapper removed from `main.rs`
+
+**Decision:** `AppState::new()` is now `async fn` and called directly via `AppState::new().await` in `main.rs`. The `tokio::task::spawn_blocking` wrapper that previously surrounded the entire call is removed.
+
+**Reasoning:** The nested-runtime panic was caused by `any-tts`'s `load_model()` creating its own internal `tokio::runtime::Runtime`. `kokoro-tiny`'s `TtsEngine::new()` is a native async function — it uses the existing Tokio runtime directly and never creates a nested one. With that constraint gone, `AppState::new()` can simply be `async`. The `spawn_blocking` call becomes unnecessary and is removed. Whisper loading (which is CPU-bound and blocking) is still wrapped in its own `spawn_blocking` call inside `AppState::new()`.
+
 ---
 
 ## 2026-06-23 — `voice_response: bool` on `TextMessagePayload`
@@ -194,6 +204,93 @@ A log of significant technical and architectural decisions, including the reason
 **Decision:** The active Kokoro voice is configurable via a `KOKORO_VOICE=<name>` key in `.astra/astra.conf`. It defaults to `af_heart` if the key is absent or the file is missing.
 
 **Reasoning:** Kokoro supports multiple voice presets. Making the voice a runtime config value (rather than a compile-time constant) means it can be changed without touching code. Putting it in `astra.conf` alongside the model paths is consistent with how other runtime settings are managed. The soft fallback (`af_heart`) prevents startup failure on installations that haven't set the key.
+
+---
+
+## 2026-06-23 — Strip markdown before TTS synthesis
+
+**Decision:** Text is passed through a `strip_markdown()` function in `tts.rs` before being sent to the phonemizer. Code fences are dropped entirely; headings, blockquotes, bullets, bold/italic markers, inline code, and Markdown links are either removed or collapsed to their visible text.
+
+**Reasoning:** Phonemizers attempt to pronounce every character they receive. Symbols like `**`, `#`, backticks, and `[text](url)` produce audible noise (e.g., the model trying to say "asterisk asterisk") or break phonemization for the surrounding word. Stripping at this layer is the right boundary — the LLM output is Markdown, the TTS input should be plain prose.
+
+---
+
+## 2026-06-23 — Switch TTS library from kokoroxide to tts-rs (superseded)
+
+**Decision:** `kokoroxide v0.1.5` replaced by `tts-rs v2026.2.1`.
+
+**Superseded by:** kokoro-tiny switch below. `tts-rs` was broken against all available `ort` rc versions (see below) and abandoned.
+
+---
+
+## 2026-06-23 — Switch TTS library from tts-rs to kokoro-tiny
+
+**Decision:** `tts-rs` is abandoned and replaced by `kokoro-tiny v0.1.0` with `features = ["cuda"]`. No model files need to be downloaded manually — `TtsEngine::new()` auto-downloads to `~/.cache/k/` on first run. `KOKORO_MODEL` and `KOKORO_TOKENIZER` config keys are removed from `astra.conf`; only `KOKORO_VOICE` remains.
+
+**Reasoning:** `tts-rs` proved broken against all available `ort` rc versions: `rc.10` exposes `session.inputs` as a field but `tts-rs` calls it as a method; `rc.12` changed `SessionBuilder` error types to `Error<SessionBuilder>` and `tts-rs` doesn't implement the conversion. GitHub issue #1 is open and unresolved; the maintainer is unresponsive. `kokoro-tiny` explicitly targets `ort rc.12`, is actively maintained, has a native async `TtsEngine::new()`, and exposes a clean `engine.synthesize(&text, Some(&voice)) -> Result<Vec<f32>, String>` API. It uses espeak-ng (bundled statically via `espeak-rs-sys`, no system install required) for POS-aware phonemization — better pronunciation than `any-tts`'s built-in phonemizer. `Arc<Mutex<TtsEngine>>` is needed because `synthesize` takes `&mut self`.
+
+**Superseded by:** the any-tts / Qwen3-TTS switch below.
+
+---
+
+## 2026-06-23 — Switch TTS from kokoro-tiny back to any-tts (Qwen3-TTS backend)
+
+**Decision:** Replace `kokoro-tiny` with `any-tts v0.1.2` using `ModelType::Qwen3Tts` (not the `ModelType::Kokoro` backend used in the original any-tts integration). Keep the current branch's text-processing (`strip_markdown`, `split_sentences`) and the `voice_response` / `TtsEnd` protocol; rewrite only the synthesis layer. Supersedes the kokoro-tiny switch above.
+
+**Reasoning:** Both prior TTS paths failed for unrelated reasons — any-tts's *Kokoro* backend used a native-Rust phonemizer that malformed audio, and `kokoro-tiny` shipped a voicepack-indexing bug (`voice[0]` instead of `voice[len(tokens)]`) that produced gappy, mistimed audio (diagnosed 2026-06-23). Qwen3-TTS is end-to-end neural — no espeak/native phonemizer at all — so it sidesteps the entire phonemizer class of problems, is open-weight + locally runnable (no cloud dependency), and adds instruction-following and voice cloning. Verified against the any-tts 0.1.2 source: `ModelType::Qwen3Tts` is a real Candle backend and `TtsModel::synthesize(&self, …)` takes `&self`, so `Arc<dyn TtsModel>` replaces `Arc<Mutex<TtsEngine>>` (no mutex, concurrent synths possible).
+
+**Tradeoffs / consequences:**
+- **~20× model size, autoregressive:** Qwen3-TTS-1.7B vs Kokoro-82M. Higher time-to-first-audio; latency must be measured before full buildout.
+- **No streaming API:** any-tts only exposes whole-clip `synthesize`. To keep voice real-time, astra must stream per-sentence (synthesize each `split_sentences` chunk and send its own binary frame) instead of concatenating then sending once. This also dissolves the inter-clip concatenation seams.
+- **Revives WSL2-only dev builds:** any-tts (candle-kernels / esaxx-rs `/MT`) cannot link with whisper-rs (`/MD`) on native Windows MSVC — see the WSL2 decision above. The native-Windows dev convenience gained via kokoro-tiny's `ort` backend is lost.
+- **Revives the nested-runtime gotcha:** any-tts `load_model()` creates its own Tokio runtime → re-wrap in `spawn_blocking`. Sample rate is again model-derived (`tts_model.sample_rate()`), not a 24 kHz constant.
+- **VRAM on the 16 GB server is tight:** qwen3.5:9b + 1.7B TTS + Whisper ≈ 12–14 GB resident; keep the Whisper model small and watch peak usage.
+
+---
+
+## 2026-06-24 — TTS latency findings: Qwen3-TTS-1.7B is not realtime on the dev GPU
+
+**Decision:** Keep Qwen3-TTS-1.7B (any-tts) for now, but treat **RTF < 1** (synthesis faster than playback) as the gating requirement for streaming voice. Pursue in order: (1) `TTS_DTYPE` f16-vs-bf16 A/B, (2) a smaller/faster model, (3) a non-autoregressive model (Kokoro) if needed. Per-sentence interleaving is temporarily disabled (whole-clip synthesis) while measuring; streaming token-feed is deferred.
+
+**Reasoning (measured on the dev box — RTX 3070, 8 GB, WSL2):**
+- RTF is consistently **~2.4–2.8** (e.g. 5.0 s of audio took 14 s). Token counts are proportional to text and EOS fires correctly, so it is genuine autoregressive speed, not over-generation. RTF > 1 means synthesis can't keep pace with playback → mid-utterance stalls regardless of chunking/interleaving (which change *when* audio starts, not the generation rate). The LLM is fast (~1.4 s to first token), so latency is almost entirely TTS.
+- The "Candle fp32 fallback" hypothesis was **disproven** by reading any-tts source: `DType::default()` is BF16 (`config.rs:1189-1198`) and weights are explicitly `.to_dtype(BF16)` on CUDA load (`config.rs:699-715`). The model already runs BF16 (~3.4 GB for 1.7B); the earlier OOM is a tight-8 GB-margin issue, not a 2× bloat. f16 is worth an A/B only because Candle's bf16 *matmul* kernel can be slower than f16 on Ampere.
+- **any-tts exposes no streaming synthesis API** — `TtsModel::synthesize` is whole-clip; the Qwen3-TTS streaming path exists in the model but the binding hardcodes non-streaming (`trailing_text_hidden len=1`). True token-streaming would need a fork and wouldn't help while RTF > 1.
+- `Qwen3-TTS-12Hz-0.6B-CustomVoice` exists and is same-architecture, but didn't work in practice — reverted to the default 1.7B.
+
+**Consequence:** added runtime knobs `TTS_MODEL_ID`, `TTS_DTYPE`, `TTS_MAX_TOKENS` so model/dtype/length are tunable via `astra.conf` + restart, avoiding slow WSL candle rebuilds.
+
+**Superseded by:** 2026-06-25 — switch to the `Qwen3-TTS-Rust` crate (GGUF/llama.cpp), which hits RTF < 1 (below).
+
+---
+
+## 2026-06-25 — Switch TTS to the `Qwen3-TTS-Rust` crate (GGUF/llama.cpp + ONNX); realtime achieved
+
+**Decision:** Replace `any-tts` (Candle) with the [`cgisky1980/Qwen3-TTS-Rust`](https://github.com/cgisky1980/Qwen3-TTS-Rust) crate (git dep, pinned rev, `features=["vulkan"]`, `ort` pinned `=2.0.0-rc.11`). Same Qwen3-TTS model family, but run as GGUF via llama.cpp (Vulkan GPU) for the talker/predictor + an ONNX audio decoder. `AppState.tts`: `Arc<dyn TtsModel>` → `Arc<Mutex<TtsEngine>>` (synthesis takes `&mut self`); load is a real `async fn` (awaited directly, no `spawn_blocking`); synthesis runs in `spawn_blocking` holding the std mutex. Voice = a `VoiceFile` speaker profile loaded once at startup (`Arc<VoiceFile>`). Config: `TTS_QUANT` (none|q5_k_m|q8_0) replaces `TTS_DTYPE`/`TTS_MODEL_ID`; `TTS_MAX_TOKENS` → `set_max_steps`. Native libs (`libllama.so`, `libggml-*.so`, `libonnxruntime.so`) are dlopen'd from `./runtime` at the process CWD; model files live in `.astra/models/tts/` and speaker JSONs in `.astra/models/tts/speakers/`.
+
+**Reasoning:** any-tts/Candle was stuck at RTF ~2.5 (autoregressive BF16, no quantization). GGUF quantization via llama.cpp + GPU offload is the proven realtime path for this model family. On the Linux server (RTX 5060 Ti, Vulkan) the integrated pipeline measures **RTF 0.80** — under realtime — with whisper (CUDA) and the resident Ollama 9B (CUDA) coexisting on the same GPU. The three native stacks (whisper.cpp static + llama.cpp dlopen + onnxruntime dlopen) coexist in one process without symbol clashes (Rust doesn't `-rdynamic`, so the two ggml's don't interpose).
+
+**Findings that shaped this (and corrected earlier guesses):**
+- **`--release` is mandatory.** A debug build ran at RTF ~8; release dropped it to ~0.8. The per-frame hot path (projection matmul, sampler over the vocab, 16 predictor samplings, ONNX tensor marshalling) is the *crate's own Rust*, which debug-mode pessimizes ~10×, starving the GPU between kernels. Added `[profile.dev.package."*"] opt-level = 3` so dev builds aren't a footgun.
+- **CUDA/Vulkan contention was a red herring.** RTF 0.80 holds with Ollama (CUDA) + whisper (CUDA) resident alongside the Vulkan TTS — coexistence is fine. No CUDA-llama build needed.
+- **Quantization barely moves RTF here** (the 1.4B talker isn't memory-bound on a fast 16 GB card), but Q5 saves ~1.7 GB VRAM for sharing the card with the 9B LLM — kept for that reason.
+- **The crate is Windows-GPU-first:** its only GPU ONNX path is DirectML (`#[cfg(windows)]`); on Linux the ONNX *decoder* is hardcoded to CPU. Acceptable (not the bottleneck at RTF 0.8), and why the crate's 0.55 benchmark — a Windows number — doesn't transfer.
+- The crate **does** expose a streaming API (`generate_with_voice_streaming`, chunks via a tokio channel) — adopted next to cut time-to-first-audio.
+
+**Tradeoffs / consequences:**
+- **Provisioning is manual:** `runtime/` (native libs) must sit at astra's CWD; model + speaker files under `.astra/models/tts/`. Documented in the README.
+- **Pinned to a young crate at a specific rev** — upstream churn is a risk; the rev pin and `ort` pin guard against it.
+- **GPU ONNX decode deferred** (would need a crate fork to add a CUDA EP) — unnecessary while RTF < 1.
+
+---
+
+## 2026-06-25 — Sub-sentence TTS streaming + transcript synced to audio
+
+**Decision:** Stream TTS audio sub-sentence and reveal the transcript in lockstep with playback. Server: `synthesize_sentence` → `synthesize_sentence_streaming`, which drives the crate's `generate_with_voice_streaming` and forwards each decoded PCM chunk (~every 4 codec frames ≈ 320 ms) to the client as its own binary frame from inside `spawn_blocking` via a `tokio::mpsc` channel. A new `tts_sentence` protocol message (the spoken, markdown-stripped text) is sent before each sentence's chunks. Web client (`astra-web`): a Web Audio **scheduling cursor** plays chunks gapless as they arrive, and each sentence's text is revealed by a timer set to that chunk's scheduled play time — so text appears exactly as it's spoken.
+
+**Reasoning:** At RTF < 1 the audio keeps up once it starts, but whole-sentence synthesis still cost multiple seconds of time-to-first-audio on long sentences; per-chunk streaming drops that to a few hundred ms. The transcript can't be synced client-side (the PCM stream has no sentence boundaries), so the server marks each sentence; revealing on the Web Audio clock — not on receipt — keeps text aligned to speech even as the synthesis buffer runs ahead of playback. The old client buffered every frame and played one blob at `tts_end`; that path is removed.
+
+**Consequences:** `tts_start`/`tts_sentence` are now required by the web client (it waits for `tts_start` to learn the sample rate), so server + client must be deployed together. The displayed transcript is the spoken (stripped) text, not full markdown. Per-word sync would need finer markers; per-sentence is the current granularity.
 
 ---
 
