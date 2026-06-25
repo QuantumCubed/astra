@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-22
+updated: 2026-06-24
 ---
 
 # Roadmap
@@ -71,7 +71,7 @@ Error codes are deferred — defined when the full set of error cases is known.
 
 - **STT/TTS placement:** Server-side, in-process within the Astra binary
 - **STT:** `whisper-rs` v0.16.0 (whisper.cpp via C FFI)
-- **TTS:** `any-tts` v0.1.1 (Kokoro 82M via Candle, pure Rust)
+- **TTS:** `any-tts` v0.1.2 with `ModelType::Qwen3Tts` (Qwen3-TTS-1.7B, Candle-native). Autoregressive → RTF ~2.5 on the dev RTX 3070; realtime needs RTF < 1 (tuning — see [[Decisions]])
 - **Audio transport:** Raw PCM binary WebSocket frames (not Opus). 16kHz in, 24kHz out.
 - **Utterance boundaries:** Push-to-talk — client sends `audio_end` JSON message
 

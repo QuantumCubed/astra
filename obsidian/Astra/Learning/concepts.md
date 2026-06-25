@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-06-24
 ---
 
 # Concepts
@@ -258,5 +258,15 @@ In Rust, async is contagious: if a function you call is `async`, you must either
 **Source:** Claude
 
 `tracing` (and the older `log` crate) is a *facade*: macros like `info!`, `warn!`, and `debug!` only do anything if a *subscriber* has been installed to consume the events they emit. With no subscriber, every macro call is a near-zero-cost no-op and the message is silently discarded — nothing reaches stdout or stderr. So a dependency that reports progress through `tracing::info!` (like any-tts logging its 4.5 GB model download) produces *no output at all* in an application that never calls something like `tracing_subscriber::fmt().init()`. This is why `println!`-based logging (kokoro-tiny's) was always visible but `tracing`-based logging is not: `println!` writes to stdout directly, while `tracing` routes through the subscriber layer that, here, didn't exist. Installing one subscriber once at startup makes all `tracing` output — from your own code and from your dependencies — visible.
+
+---
+
+## Realtime Factor (RTF) & Autoregressive TTS Latency
+
+**Date:** 2026-06-24
+**Context:** Diagnosing why Qwen3-TTS felt slow as a streaming voice backend
+**Source:** Claude
+
+Realtime factor (RTF) = synthesis time ÷ audio duration. RTF < 1 means you generate audio faster than it plays; RTF > 1 means you can't keep up. For *streaming* voice this is a hard gate: at RTF > 1 the player drains its buffer faster than the synthesizer refills it, so audio stalls mid-utterance no matter how cleverly you chunk or interleave — interleaving only changes *when* the first audio arrives, not the sustained generation rate. Autoregressive TTS (like Qwen3-TTS) is especially prone to RTF > 1 on modest GPUs because it generates audio codec tokens one at a time, sequentially, so wall-clock cost scales with output length and the parameter count understates it (a "1.7B" autoregressive model can be far slower than a 1.7B one-shot forward pass). The fix for RTF > 1 is fundamentally a faster model or faster hardware — not a software pipeline change.
 
 ---

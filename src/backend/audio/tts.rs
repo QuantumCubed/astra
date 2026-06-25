@@ -1,18 +1,36 @@
 use std::sync::Arc;
-use any_tts::{DeviceSelection, ModelType, SynthesisRequest, TtsConfig, TtsModel, load_model};
+use any_tts::{DType, DeviceSelection, ModelType, SynthesisRequest, TtsConfig, TtsModel, load_model};
 
 /// Load the Qwen3-TTS model via any-tts.
 ///
 /// Blocking: on the first run this downloads ~4.5 GB of weights from HuggingFace,
 /// and any-tts may spin up its own runtime internally while loading. Callers must
 /// invoke this inside `spawn_blocking`.
-pub fn load_tts_model(model_id: Option<String>) -> anyhow::Result<Arc<dyn TtsModel>> {
+pub fn load_tts_model(
+    model_id: Option<String>,
+    dtype: Option<String>,
+) -> anyhow::Result<Arc<dyn TtsModel>> {
     // `Auto` selects CUDA → Metal → CPU; dtype defaults to BF16 on GPU.
     let mut config = TtsConfig::new(ModelType::Qwen3Tts).with_device(DeviceSelection::Auto);
     // Override the default 1.7B with e.g. `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` for
     // lower latency (same architecture, fewer params, same CustomVoice timbres).
     if let Some(id) = model_id {
         config = config.with_hf_model_id(id);
+    }
+    // Optional dtype override. f16 is the same VRAM as bf16 but may hit a faster
+    // matmul kernel on Ampere; f32 doubles VRAM (diagnostic only).
+    if let Some(dtype) = dtype {
+        let dtype = match dtype.to_ascii_lowercase().as_str() {
+            "bf16" => DType::BF16,
+            "f16" | "fp16" => DType::F16,
+            "f32" | "fp32" => DType::F32,
+            other => {
+                return Err(anyhow::anyhow!(
+                    "unknown TTS_DTYPE '{other}' (expected bf16, f16, or f32)"
+                ));
+            }
+        };
+        config = config.with_dtype(dtype);
     }
     let model = load_model(config)
         .map_err(|e| anyhow::anyhow!("failed to load Qwen3-TTS model: {e}"))?;

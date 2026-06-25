@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-06-24
 ---
 
 # Todos
@@ -9,7 +9,7 @@ updated: 2026-06-23
 
 ## In Progress
 
-_Nothing active._
+- [ ] TTS latency: get RTF < 1 on the dev GPU — `TTS_DTYPE=f16` A/B, then a faster / non-autoregressive model
 
 ## Backlog
 
@@ -17,7 +17,10 @@ _Nothing active._
 
 - [ ] Download Whisper `ggml-base.en.bin` model file to `.astra/models/stt/`
 - [ ] End-to-end voice path test with a real client
-- [ ] Sentence-boundary streaming for TTS (synthesize in chunks as LLM streams, reduce latency)
+- [ ] Re-enable per-sentence interleaving once RTF < 1 (machinery kept in `tts.rs`/`ws.rs`)
+- [ ] Investigate why `Qwen3-TTS-12Hz-0.6B-CustomVoice` failed to load/run (reverted to 1.7B)
+- [ ] If RTF stays > 1: evaluate a non-autoregressive backend (Kokoro, RTF ~0.05)
+- [ ] (Future) Fork any-tts to expose a streaming synthesis API for Qwen3-TTS
 
 ### Phase 3 — Tool Layer
 
@@ -27,6 +30,10 @@ _Nothing active._
 
 ## Done
 
+- [x] TTS migrated to `any-tts v0.1.2` / `ModelType::Qwen3Tts` — `Arc<dyn TtsModel>`, `spawn_blocking` load, BF16; replaced `kokoro-tiny` (see Decisions 2026-06-24)
+- [x] Added runtime TTS knobs: `TTS_VOICE` (renamed from `KOKORO_VOICE`), `TTS_MAX_TOKENS`, `TTS_MODEL_ID`, `TTS_DTYPE`
+- [x] Added `TtsStart(TtsStartPayload)` protocol message — audio format sent before the first chunk
+- [x] Added observability: `tracing_subscriber`, model-load timing, per-synth RTF + LLM first-token logging
 - [x] TTS library finalised: `kokoro-tiny v0.1.0` — `tts.rs`, `state.rs`, `config.rs`, `Cargo.toml`, `astra.conf` all updated; kokoroxide and tts-rs abandoned (see Decisions)
 - [x] `AppState::new()` made async; `spawn_blocking` wrapper in `main.rs` removed — kokoro-tiny uses native async, no nested runtime issue
 - [x] WSL2 (Ubuntu) established as development environment for Linux/CUDA builds — native Windows MSVC is blocked by an irresolvable CRT conflict (LNK2038)

@@ -31,6 +31,10 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         let request_id = envelope.request_id.clone();
                         match envelope.message {
                             Message::TextMessage(payload) => {
+                                tracing::info!(
+                                    "text_message received (voice_response={})",
+                                    payload.voice_response
+                                );
                                 conversation.add_user_turn(&payload.content);
                                 run_agent_loop(
                                     &mut socket,
@@ -43,6 +47,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             }
                             Message::AudioEnd => {
                                 let audio = std::mem::take(&mut audio_buffer);
+                                tracing::info!("audio_end received ({} bytes)", audio.len());
                                 match transcribe(state.whisper_ctx.clone(), audio).await {
                                     Ok(transcript) => {
                                         let reply = Envelope {
@@ -80,6 +85,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         }
                     }
                     Err(e) => {
+                        tracing::warn!("failed to parse incoming message: {e}");
                         let reply = Envelope {
                             request_id: None,
                             message: Message::Error(ErrorPayload {
@@ -203,7 +209,19 @@ async fn run_agent_loop(
         };
 
         let llm_started = std::time::Instant::now();
-        if let Ok(res) = client::chat(&state.client, &state.ollama_url, req).await {
+        let chat = client::chat(&state.client, &state.ollama_url, req).await;
+        if let Err(e) = &chat {
+            tracing::error!("Ollama request failed: {e:?}");
+            send_error(
+                socket,
+                request_id.clone(),
+                "LLM_ERROR",
+                &format!("Ollama request failed: {e}"),
+            )
+            .await;
+            break;
+        }
+        if let Ok(res) = chat {
             let mut stream = res.bytes_stream();
             let mut line_buf = String::new();
             let mut full_content = String::new();

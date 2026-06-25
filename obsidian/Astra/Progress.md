@@ -1,11 +1,26 @@
 ---
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-06-24
 ---
 
 # Progress
 
 [[ASTRA|← Home]]
+
+---
+
+## 2026-06-24 — TTS migrated to any-tts/Qwen3-TTS; latency tuning
+
+- Diagnosed the kokoro-tiny gappy-audio root cause: its `load_voices` hardcodes `voicepack[0]` instead of `voice[len(tokens)]` — wrong style vector → bad durations. Verified against reference `thewh1teagle/kokoro-onnx`.
+- Migrated TTS from `kokoro-tiny` to **`any-tts v0.1.2`** with `ModelType::Qwen3Tts` (Qwen3-TTS-1.7B-CustomVoice). `AppState.tts`: `Arc<Mutex<TtsEngine>>` → `Arc<dyn TtsModel>` (synthesize takes `&self`). Load wrapped in `spawn_blocking` (any-tts's nested runtime). Cargo: `kokoro-tiny` → `any-tts` (`default-features=false`, `qwen3-tts`/`download`/`cuda`); added `tracing` + `tracing-subscriber`.
+- Renamed `KOKORO_VOICE` → `TTS_VOICE`; added runtime knobs `TTS_MAX_TOKENS`, `TTS_MODEL_ID`, `TTS_DTYPE` (tune model/dtype/length via `astra.conf` + restart, no slow candle rebuild).
+- Added `TtsStart(TtsStartPayload)` to the protocol — audio format sent before the first chunk so the client can configure playback.
+- Built per-sentence streaming → inline interleave (synthesize each sentence as it streams), then **temporarily reverted to whole-clip** synthesis to isolate latency measurements (`take_sentences`/`speak_sentence` kept for restore).
+- Added observability: `tracing_subscriber` in `main.rs`; model-load timing, per-synth **RTF** logging, LLM first-token/streamed timing.
+- **Key finding:** Qwen3-TTS-1.7B runs at **RTF ~2.4–2.8** on the dev RTX 3070 — too slow for realtime streaming (synthesis can't keep pace with playback). EOS fires correctly (not over-generation); LLM is fast (~1.4 s first token).
+- Investigated the "Candle fp32 fallback" hypothesis — **disproven**: any-tts runs BF16 on CUDA. OOM is tight-8 GB-margin, not 2× bloat.
+- Confirmed any-tts has **no streaming synthesis API** (whole-clip only; Qwen3-TTS streaming exists in the model but the binding hardcodes non-streaming).
+- Path forward: `TTS_DTYPE=f16` A/B → smaller/faster model → non-autoregressive (Kokoro) if RTF stays > 1; streaming deferred.
 
 ---
 

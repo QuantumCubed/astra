@@ -3,3 +3,7 @@ settings.local.json
 astra.conf
 .astra/models/stt
 .astra/models/tts
+tts-spike/target
+tts-spike/models
+tts-spike/runtime
+spike_output.wav

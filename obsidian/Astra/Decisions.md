@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-06-24
 ---
 
 # Decisions
@@ -245,6 +245,20 @@ A log of significant technical and architectural decisions, including the reason
 - **Revives WSL2-only dev builds:** any-tts (candle-kernels / esaxx-rs `/MT`) cannot link with whisper-rs (`/MD`) on native Windows MSVC — see the WSL2 decision above. The native-Windows dev convenience gained via kokoro-tiny's `ort` backend is lost.
 - **Revives the nested-runtime gotcha:** any-tts `load_model()` creates its own Tokio runtime → re-wrap in `spawn_blocking`. Sample rate is again model-derived (`tts_model.sample_rate()`), not a 24 kHz constant.
 - **VRAM on the 16 GB server is tight:** qwen3.5:9b + 1.7B TTS + Whisper ≈ 12–14 GB resident; keep the Whisper model small and watch peak usage.
+
+---
+
+## 2026-06-24 — TTS latency findings: Qwen3-TTS-1.7B is not realtime on the dev GPU
+
+**Decision:** Keep Qwen3-TTS-1.7B (any-tts) for now, but treat **RTF < 1** (synthesis faster than playback) as the gating requirement for streaming voice. Pursue in order: (1) `TTS_DTYPE` f16-vs-bf16 A/B, (2) a smaller/faster model, (3) a non-autoregressive model (Kokoro) if needed. Per-sentence interleaving is temporarily disabled (whole-clip synthesis) while measuring; streaming token-feed is deferred.
+
+**Reasoning (measured on the dev box — RTX 3070, 8 GB, WSL2):**
+- RTF is consistently **~2.4–2.8** (e.g. 5.0 s of audio took 14 s). Token counts are proportional to text and EOS fires correctly, so it is genuine autoregressive speed, not over-generation. RTF > 1 means synthesis can't keep pace with playback → mid-utterance stalls regardless of chunking/interleaving (which change *when* audio starts, not the generation rate). The LLM is fast (~1.4 s to first token), so latency is almost entirely TTS.
+- The "Candle fp32 fallback" hypothesis was **disproven** by reading any-tts source: `DType::default()` is BF16 (`config.rs:1189-1198`) and weights are explicitly `.to_dtype(BF16)` on CUDA load (`config.rs:699-715`). The model already runs BF16 (~3.4 GB for 1.7B); the earlier OOM is a tight-8 GB-margin issue, not a 2× bloat. f16 is worth an A/B only because Candle's bf16 *matmul* kernel can be slower than f16 on Ampere.
+- **any-tts exposes no streaming synthesis API** — `TtsModel::synthesize` is whole-clip; the Qwen3-TTS streaming path exists in the model but the binding hardcodes non-streaming (`trailing_text_hidden len=1`). True token-streaming would need a fork and wouldn't help while RTF > 1.
+- `Qwen3-TTS-12Hz-0.6B-CustomVoice` exists and is same-architecture, but didn't work in practice — reverted to the default 1.7B.
+
+**Consequence:** added runtime knobs `TTS_MODEL_ID`, `TTS_DTYPE`, `TTS_MAX_TOKENS` so model/dtype/length are tunable via `astra.conf` + restart, avoiding slow WSL candle rebuilds.
 
 ---
 

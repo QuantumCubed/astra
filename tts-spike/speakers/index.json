@@ -1,0 +1,49 @@
+{
+  "speakers": [
+    {
+      "name": "vivian",
+      "id": 3065,
+      "description": "female_adult"
+    },
+    {
+      "name": "serena",
+      "id": 3066,
+      "description": "female_adult"
+    },
+    {
+      "name": "uncle_fu",
+      "id": 3010,
+      "description": "male_middle"
+    },
+    {
+      "name": "ryan",
+      "id": 3061,
+      "description": "male_young"
+    },
+    {
+      "name": "aiden",
+      "id": 2861,
+      "description": "male_young"
+    },
+    {
+      "name": "ono_anna",
+      "id": 2873,
+      "description": "female_adult"
+    },
+    {
+      "name": "sohee",
+      "id": 2864,
+      "description": "female_young"
+    },
+    {
+      "name": "eric",
+      "id": 2875,
+      "description": "male_adult"
+    },
+    {
+      "name": "dylan",
+      "id": 2878,
+      "description": "male_adult"
+    }
+  ]
+}

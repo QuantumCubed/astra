@@ -10,7 +10,7 @@ Astra bridges WebSocket clients to a local Ollama LLM. It maintains per-connecti
 
 ## Status
 
-Phase 1 (WebSocket Foundation) is complete. Phase 2 (Voice Interface) is in progress — audio pipeline is implemented; pending model downloads and end-to-end test.
+Phase 1 (WebSocket Foundation) is complete. Phase 2 (Voice Interface) is in progress — the full STT → LLM → TTS pipeline works; TTS uses Qwen3-TTS via `any-tts`, and its realtime latency is being tuned.
 
 ## Setup
 
@@ -18,8 +18,8 @@ Phase 1 (WebSocket Foundation) is complete. Phase 2 (Voice Interface) is in prog
 
 - [Rust](https://rustup.rs/) (edition 2024)
 - A running [Ollama](https://ollama.com/) instance accessible from the host machine
-- **Linux / WSL2 required** for builds that include `whisper-rs` and `kokoro-tiny`. The two crates have a C runtime conflict on Windows MSVC (LNK2038 `/MD` vs `/MT`) that has no linker workaround. All audio-enabled builds run on Linux or WSL2 (Ubuntu). CUDA works via WSL2's GPU passthrough.
-- **Linux build deps:** `sudo apt install -y libasound2-dev` (ALSA, pulled in by kokoro-tiny).
+- **Linux / WSL2 required** for builds that include `whisper-rs` and `any-tts`. The two crates have a C runtime conflict on Windows MSVC (LNK2038 `/MD` vs `/MT`, via `candle-kernels`/`esaxx-rs`) that has no linker workaround. All audio-enabled builds run on Linux or WSL2 (Ubuntu). CUDA works via WSL2's GPU passthrough.
+- **Linux build deps:** `sudo apt install -y libasound2-dev` (ALSA, pulled in transitively by the audio crates).
 
 ### Configuration
 
@@ -30,10 +30,13 @@ All runtime config lives in `.astra/` at the project root.
 ```
 OLLAMA_ENDPOINT=http://<your-ollama-host>:11434
 WHISPER_MODEL=.astra/models/stt/ggml-base.en.bin
-KOKORO_VOICE=af_heart
+TTS_VOICE=ryan
+TTS_MAX_TOKENS=512
+# TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice   # optional model override (default: 1.7B)
+# TTS_DTYPE=f16                                         # optional: bf16 (default) | f16 | f32
 ```
 
-The server will fail at startup with a clear error if `OLLAMA_ENDPOINT` or `WHISPER_MODEL` are missing. `KOKORO_VOICE` defaults to `af_heart` if absent. Whisper model files (`.ggml` format) can be downloaded from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp). `ggml-base.en.bin` is a good starting point (~142MB). Kokoro TTS models are auto-downloaded to `~/.cache/k/` on first run — no manual download needed.
+The server will fail at startup with a clear error if `OLLAMA_ENDPOINT` or `WHISPER_MODEL` are missing. `TTS_VOICE` defaults to `ryan` if absent; `TTS_MAX_TOKENS`, `TTS_MODEL_ID`, and `TTS_DTYPE` are optional TTS tuning knobs. Whisper model files (`.ggml` format) can be downloaded from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp). `ggml-base.en.bin` is a good starting point (~142MB). Qwen3-TTS model weights (~4.5 GB for the 1.7B) auto-download from HuggingFace on first run — no manual download needed.
 
 **`.astra/core/`** — hard behavioral constraints injected into every Ollama request (identity, tool rules, behavior). Loaded first.
 
@@ -108,6 +111,7 @@ All messages share a common envelope:
 | `tool_result` | Server → Client | `{ "name": "...", "result": "..." }` |
 | `audio_end` | Client → Server | `{}` — signals end of mic audio (push-to-talk) |
 | `transcript` | Server → Client | `{ "text": "..." }` — STT result from Whisper |
+| `tts_start` | Server → Client | `{ "sample_rate": 24000, "channels": 1, "format": "f32le" }` — start of TTS audio stream, sent before the first PCM frame |
 | `tts_end` | Server → Client | `{ "sample_rate": 24000, "channels": 1, "format": "f32le" }` — signals end of TTS audio stream |
 | `error` | Server → Client | `{ "message": "...", "code": "..." }` |
 

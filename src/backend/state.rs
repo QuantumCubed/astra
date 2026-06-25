@@ -4,8 +4,8 @@ use whisper_rs::WhisperContext;
 
 use crate::backend::audio::{stt::load_whisper_ctx, tts::load_tts_model};
 use crate::backend::config::{
-    load_ollama_url, load_system_prompt, load_tts_max_tokens, load_tts_model_id, load_tts_voice,
-    load_whisper_model_path,
+    load_ollama_url, load_system_prompt, load_tts_dtype, load_tts_max_tokens, load_tts_model_id,
+    load_tts_voice, load_whisper_model_path,
 };
 use crate::tools::registry::{register_tools, Tool};
 
@@ -36,8 +36,9 @@ impl AppState {
         // any-tts loading is blocking and creates its own runtime internally, so it
         // must run outside the async context (see Decisions.md, 2026-06-23 WSL2 entry).
         let tts_model_id = load_tts_model_id();
+        let tts_dtype = load_tts_dtype();
         let started = std::time::Instant::now();
-        let tts = tokio::task::spawn_blocking(move || load_tts_model(tts_model_id))
+        let tts = tokio::task::spawn_blocking(move || load_tts_model(tts_model_id, tts_dtype))
             .await
             .expect("tts init panicked")
             .expect("failed to load Qwen3-TTS model");

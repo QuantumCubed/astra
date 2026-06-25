@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-06-24
 ---
 
 # Architecture
@@ -34,16 +34,16 @@ WebSocket client
 
 | Module | Responsibility |
 |---|---|
-| `src/main.rs` | Router setup, server startup, AppState init |
-| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, shared reqwest client, `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>`, `tts_voice` |
-| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys (`OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `KOKORO_VOICE`) |
+| `src/main.rs` | Router setup, server startup, AppState init, `tracing_subscriber` logging init |
+| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, shared reqwest client, `Arc<WhisperContext>`, `Arc<dyn TtsModel>` (any-tts), `tts_voice`, `tts_max_tokens` |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys (`OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_MODEL_ID`, `TTS_DTYPE`) |
 | `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
 | `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
 | `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
 | `src/backend/ollama/types.rs` | `OllamaMessage`, `ChatRequest`, `Role` enum |
 | `src/backend/audio.rs` | Audio module root |
 | `src/backend/audio/stt.rs` | STT — `load_whisper_ctx` + `transcribe` (whisper-rs 0.16.0, `spawn_blocking`) |
-| `src/backend/audio/tts.rs` | TTS — `load_tts_engine` + `synthesize` (kokoro-tiny, `spawn_blocking`); `strip_markdown` pre-processes LLM output before phonemization |
+| `src/backend/audio/tts.rs` | TTS — `load_tts_model` + `synthesize_sentence` (any-tts / Qwen3-TTS, `spawn_blocking`); `strip_markdown` + `take_sentences` pre-process LLM output |
 | `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop, audio buffer, full voice pipeline |
 | `src/tools/registry.rs` | `Tool`/`ToolFunction` structs, `register_tools()` |
 | `src/tools/dispatch.rs` | Routes tool call by name to implementation |
@@ -94,26 +94,29 @@ All text frames use a JSON envelope:
 | `tool_result` | Server → Client | Tool output sent back to model |
 | `audio_end` | Client → Server | Signals end of mic audio (push-to-talk) |
 | `transcript` | Server → Client | STT result from Whisper |
+| `tts_start` | Server → Client | Start of TTS audio stream; carries `TtsStartPayload { sample_rate, channels, format }` so the client can configure playback before the first chunk |
 | `tts_end` | Server → Client | Signals end of TTS audio stream; carries `TtsEndPayload { sample_rate, channels, format }` |
 | `error` | Server → Client | Error envelope |
 
 **Binary frames** carry raw PCM audio — no JSON wrapper. Incoming = mic audio (16kHz mono 16-bit LE); outgoing = TTS output (f32 LE, sample rate reported in `TtsEndPayload.sample_rate`).
 
-## Audio Pipeline (Phase 2 — complete)
+## Audio Pipeline (Phase 2 — working; TTS latency being tuned)
 
 ```
 binary WS frames (PCM chunks)
     └── handle_socket detects binary frame
             └── accumulate in audio buffer until AudioEnd JSON message
                     └── backend::audio::stt (whisper-rs / whisper.cpp FFI)
-                            └── transcript text → run_agent_loop (existing)
+                            └── transcript text → run_agent_loop
                                     └── LLM response text
-                                            └── backend::audio::tts (any-tts / Kokoro)
-                                                    └── stream PCM chunks as binary WS frames → client
+                                            └── backend::audio::tts (any-tts / Qwen3-TTS)
+                                                    └── TtsStart → PCM binary frame(s) → TtsEnd
 ```
 
 **STT:** `whisper-rs` v0.16.0 — whisper.cpp via C FFI. Requires LLVM/libclang on Windows for the bindgen build step.
-**TTS:** `kokoro-tiny` v0.1.0 — Kokoro via ONNX Runtime (`ort` rc.12). espeak-ng phonemizer bundled statically via `espeak-rs-sys` (no system install needed). Returns `Vec<f32>` PCM at 24kHz. Models auto-downloaded to `~/.cache/k/` on first run. `TtsEngine` is wrapped in `Arc<Mutex<_>>` because `synthesize` takes `&mut self`.
+**TTS:** `any-tts` v0.1.2 with `ModelType::Qwen3Tts` (Qwen3-TTS-12Hz-1.7B-CustomVoice) — a Candle-native, end-to-end neural model. Weights auto-download from HuggingFace (~4.5 GB) on first run and load in BF16. Stored as `Arc<dyn TtsModel>` (no Mutex — `synthesize` takes `&self`). Output is f32 PCM at the model's native rate (`tts.sample_rate()`, 24 kHz).
+
+**Latency:** Qwen3-TTS is autoregressive; on the dev RTX 3070 it runs at **RTF ~2.5** (synthesis ~2.5× slower than realtime), too slow for smooth streaming. Per-sentence interleaving (`take_sentences` + `speak_sentence`) is implemented but **temporarily disabled** (whole-clip synthesis) while tuning. Instrumentation logs per-synth RTF and LLM first-token timing. Runtime knobs: `TTS_MODEL_ID`, `TTS_DTYPE`, `TTS_MAX_TOKENS`. See [[Decisions]] (2026-06-24).
 
 ## Current Tools
 

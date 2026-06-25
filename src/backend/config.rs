@@ -91,3 +91,19 @@ pub fn load_tts_model_id() -> Option<String> {
     }
     None
 }
+
+/// Optional weight dtype override for TTS: `bf16` (any-tts default on GPU), `f16`, or
+/// `f32`. `None` → any-tts's default (BF16). f16 is the same VRAM as bf16 but may use a
+/// faster matmul kernel on Ampere; f32 doubles VRAM (diagnostic only).
+pub fn load_tts_dtype() -> Option<String> {
+    let content = std::fs::read_to_string(".astra/astra.conf").ok()?;
+    for line in content.lines() {
+        if let Some(value) = line.strip_prefix("TTS_DTYPE=") {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
