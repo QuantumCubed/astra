@@ -3,6 +3,8 @@ settings.local.json
 astra.conf
 .astra/models/stt
 .astra/models/tts
+# qwen3-tts dlopens its llama.cpp + onnxruntime .so's from ./runtime at the process CWD
+/runtime
 tts-spike/target
 tts-spike/models
 tts-spike/runtime

@@ -11,7 +11,12 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.52.3", features = ["full"] }
 whisper-rs = { version = "0.16.0", features = ["cuda"] }
-any-tts = { version = "0.1.2", default-features = false, features = ["qwen3-tts", "download", "cuda"] }
+# Qwen3-TTS via GGUF/llama.cpp (Vulkan) + ONNX decode. Replaces any-tts/candle (RTF 2.5
+# → ~1.1 on the Linux server). Native libs are dlopen'd from ./runtime at runtime; the
+# rev is pinned to the source we verified the API against.
+qwen3-tts = { git = "https://github.com/cgisky1980/Qwen3-TTS-Rust", rev = "32ed8f03c1ca9fbdcb3a888cb4006ca10ccfc74e", features = ["vulkan"] }
+# qwen3-tts pins ort ^2.0.0-rc.11; newer rc's broke its onnx.rs (SessionBuilder &mut self).
+ort = "=2.0.0-rc.11"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"

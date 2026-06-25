@@ -1,41 +1,38 @@
-use std::sync::Arc;
-use any_tts::{DType, DeviceSelection, ModelType, SynthesisRequest, TtsConfig, TtsModel, load_model};
+use std::sync::{Arc, Mutex};
+use qwen3_tts::{TtsEngine, VoiceFile};
 
-/// Load the Qwen3-TTS model via any-tts.
+/// Qwen3-TTS always decodes audio at 24 kHz (hardcoded in the crate's `AudioSample`).
+/// The engine exposes no accessor, so we surface it as a constant for the protocol frames.
+pub const TTS_SAMPLE_RATE: u32 = 24000;
+
+/// Directory holding the TTS model files (`gguf/`, `onnx/`, `tokenizer/`), mirroring
+/// whisper's `.astra/models/stt`. NOTE: the crate separately resolves `runtime/` (the
+/// llama.cpp + onnxruntime shared libs) relative to the *process CWD*, so `runtime/`
+/// must sit at astra's working directory — it is not under this dir.
+const TTS_MODEL_DIR: &str = ".astra/models/tts";
+
+/// Load the Qwen3-TTS engine (GGUF talker/predictor via llama.cpp + ONNX decoder).
 ///
-/// Blocking: on the first run this downloads ~4.5 GB of weights from HuggingFace,
-/// and any-tts may spin up its own runtime internally while loading. Callers must
-/// invoke this inside `spawn_blocking`.
-pub fn load_tts_model(
-    model_id: Option<String>,
-    dtype: Option<String>,
-) -> anyhow::Result<Arc<dyn TtsModel>> {
-    // `Auto` selects CUDA → Metal → CPU; dtype defaults to BF16 on GPU.
-    let mut config = TtsConfig::new(ModelType::Qwen3Tts).with_device(DeviceSelection::Auto);
-    // Override the default 1.7B with e.g. `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` for
-    // lower latency (same architecture, fewer params, same CustomVoice timbres).
-    if let Some(id) = model_id {
-        config = config.with_hf_model_id(id);
-    }
-    // Optional dtype override. f16 is the same VRAM as bf16 but may hit a faster
-    // matmul kernel on Ampere; f32 doubles VRAM (diagnostic only).
-    if let Some(dtype) = dtype {
-        let dtype = match dtype.to_ascii_lowercase().as_str() {
-            "bf16" => DType::BF16,
-            "f16" | "fp16" => DType::F16,
-            "f32" | "fp32" => DType::F32,
-            other => {
-                return Err(anyhow::anyhow!(
-                    "unknown TTS_DTYPE '{other}' (expected bf16, f16, or f32)"
-                ));
-            }
-        };
-        config = config.with_dtype(dtype);
-    }
-    let model = load_model(config)
-        .map_err(|e| anyhow::anyhow!("failed to load Qwen3-TTS model: {e}"))?;
-    tracing::info!("TTS voices available: {:?}", model.supported_voices());
-    Ok(Arc::from(model))
+/// Async because the crate's `new` awaits a model auto-download on first run. Unlike
+/// any-tts (which block_on'd internally and so needed `spawn_blocking`), this is a real
+/// async fn, so callers can `.await` it directly. `quant` selects the GGUF variant:
+/// "none" → `gguf/`, "q5_k_m" → `gguf_q5_k_m/`, "q8_0" → `gguf_q8_0/` (lower-cased
+/// defensively, since the crate string-matches it). `max_steps` caps the autoregressive
+/// frame count per synthesis (applied once here via `set_max_steps`).
+pub async fn load_tts_model(quant: String, max_steps: usize) -> anyhow::Result<TtsEngine> {
+    let mut engine = TtsEngine::new(TTS_MODEL_DIR, &quant.to_ascii_lowercase(), 0)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to load Qwen3-TTS engine: {e}"))?;
+    engine.set_max_steps(max_steps);
+    Ok(engine)
+}
+
+/// Load a speaker `VoiceFile` (a precomputed codec/embedding profile) by name from
+/// `<TTS_MODEL_DIR>/speakers/<name>.json`. Loaded once at startup and shared via `Arc`.
+pub fn load_tts_voice_file(name: &str) -> anyhow::Result<VoiceFile> {
+    let path = format!("{TTS_MODEL_DIR}/speakers/{name}.json");
+    VoiceFile::load(&path)
+        .map_err(|e| anyhow::anyhow!("failed to load TTS voice '{name}' from {path}: {e}"))
 }
 
 /// Drain complete sentences from a streaming text buffer, leaving any trailing
@@ -71,25 +68,23 @@ pub fn take_sentences(buf: &mut String) -> Vec<String> {
     sentences
 }
 
-/// Synthesize one chunk of text into f32 PCM at the model's native sample rate.
+/// Synthesize one chunk of text into 24 kHz f32 PCM.
 ///
-/// Qwen3-TTS is autoregressive, so synthesis is a heavy blocking call that runs
-/// on a blocking thread. The caller streams the returned samples per chunk.
-/// `max_tokens` caps generated codec tokens to bound latency and VRAM (any-tts's
-/// model default is 2048 ≈ ~170s of audio, far more than a sentence needs).
+/// `generate_with_voice` is a heavy, blocking, autoregressive FFI call that takes
+/// `&mut self`, so the engine lives behind a `Mutex` and the whole synthesis runs on a
+/// blocking thread — holding the (std) lock for its duration, i.e. one synthesis at a
+/// time. The per-sentence frame cap was applied once at load via `set_max_steps`.
 pub async fn synthesize_sentence(
-    tts: Arc<dyn TtsModel>,
-    voice: String,
+    tts: Arc<Mutex<TtsEngine>>,
+    voice: Arc<VoiceFile>,
     sentence: String,
-    max_tokens: usize,
 ) -> anyhow::Result<Vec<f32>> {
     tokio::task::spawn_blocking(move || {
-        let request = SynthesisRequest::new(sentence)
-            .with_language("en")
-            .with_voice(voice)
-            .with_max_tokens(max_tokens);
-        let audio = tts
-            .synthesize(&request)
+        let mut engine = tts
+            .lock()
+            .map_err(|_| anyhow::anyhow!("TTS engine mutex poisoned"))?;
+        let audio = engine
+            .generate_with_voice(&sentence, &voice, None)
             .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {e}"))?;
         Ok(audio.samples)
     })

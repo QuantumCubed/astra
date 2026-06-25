@@ -64,9 +64,10 @@ pub fn load_tts_voice() -> Result<String, std::io::Error> {
     ))
 }
 
-/// Max codec tokens per sentence for TTS generation. Returns `None` if the key is
-/// absent or unparseable so the caller can apply its own default. Caps runaway
-/// autoregressive generation (latency + VRAM); any-tts's model default is 2048.
+/// Max generation steps (codec frames, ~80 ms each) per sentence for TTS. Returns
+/// `None` if the key is absent or unparseable so the caller can apply its own default.
+/// Caps runaway autoregressive generation; maps onto the engine's `set_max_steps`
+/// (crate default 4096 ≈ 5 min of audio — far more than a sentence needs).
 pub fn load_tts_max_tokens() -> Option<usize> {
     let content = std::fs::read_to_string(".astra/astra.conf").ok()?;
     for line in content.lines() {
@@ -77,28 +78,14 @@ pub fn load_tts_max_tokens() -> Option<usize> {
     None
 }
 
-/// Optional HuggingFace model id override for the Qwen3-TTS backend (e.g. the 0.6B
-/// CustomVoice variant for lower latency). `None` → any-tts's default (1.7B).
-pub fn load_tts_model_id() -> Option<String> {
+/// Optional GGUF quantization variant for the Qwen3-TTS talker/predictor:
+/// `none` (default, loads `gguf/`), `q5_k_m` (`gguf_q5_k_m/`), or `q8_0` (`gguf_q8_0/`).
+/// Quant barely moved RTF on our GPU (the model isn't memory-bound) but Q5 saves ~1.7 GB
+/// VRAM for coexisting with the Ollama LLM. `None` → caller defaults to `none`.
+pub fn load_tts_quant() -> Option<String> {
     let content = std::fs::read_to_string(".astra/astra.conf").ok()?;
     for line in content.lines() {
-        if let Some(value) = line.strip_prefix("TTS_MODEL_ID=") {
-            let value = value.trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Optional weight dtype override for TTS: `bf16` (any-tts default on GPU), `f16`, or
-/// `f32`. `None` → any-tts's default (BF16). f16 is the same VRAM as bf16 but may use a
-/// faster matmul kernel on Ampere; f32 doubles VRAM (diagnostic only).
-pub fn load_tts_dtype() -> Option<String> {
-    let content = std::fs::read_to_string(".astra/astra.conf").ok()?;
-    for line in content.lines() {
-        if let Some(value) = line.strip_prefix("TTS_DTYPE=") {
+        if let Some(value) = line.strip_prefix("TTS_QUANT=") {
             let value = value.trim();
             if !value.is_empty() {
                 return Some(value.to_string());

@@ -4,7 +4,7 @@ use axum::{
 };
 use crate::{
     backend::{
-        audio::{stt::transcribe, tts::{strip_markdown, synthesize_sentence, take_sentences}},
+        audio::{stt::transcribe, tts::{strip_markdown, synthesize_sentence, take_sentences, TTS_SAMPLE_RATE}},
         conversation::Conversation,
         ollama::{client, types::ChatRequest},
         protocol::{Envelope, ErrorPayload, Message, TextChunkPayload, TranscriptPayload, TtsEndPayload, TtsStartPayload},
@@ -12,7 +12,6 @@ use crate::{
     },
     tools::dispatch,
 };
-use any_tts::TtsModel;
 use futures::StreamExt;
 
 pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
@@ -146,7 +145,7 @@ async fn speak_sentence(
         let start = Envelope {
             request_id: request_id.clone(),
             message: Message::TtsStart(TtsStartPayload {
-                sample_rate: state.tts.sample_rate(),
+                sample_rate: TTS_SAMPLE_RATE,
                 channels: 1,
                 format: "f32le".to_string(),
             }),
@@ -158,20 +157,13 @@ async fn speak_sentence(
     }
 
     let started = std::time::Instant::now();
-    match synthesize_sentence(
-        state.tts.clone(),
-        state.tts_voice.clone(),
-        text,
-        state.tts_max_tokens,
-    )
-    .await
-    {
+    match synthesize_sentence(state.tts.clone(), state.tts_voice.clone(), text).await {
         Ok(samples) => {
             if samples.is_empty() {
                 return;
             }
             let synth_s = started.elapsed().as_secs_f32();
-            let audio_s = samples.len() as f32 / state.tts.sample_rate() as f32;
+            let audio_s = samples.len() as f32 / TTS_SAMPLE_RATE as f32;
             tracing::info!(
                 "TTS: {audio_s:.1}s audio in {synth_s:.1}s (RTF {:.2})",
                 synth_s / audio_s.max(0.01)
@@ -339,7 +331,7 @@ async fn run_agent_loop(
         let end = Envelope {
             request_id: request_id.clone(),
             message: Message::TtsEnd(TtsEndPayload {
-                sample_rate: state.tts.sample_rate(),
+                sample_rate: TTS_SAMPLE_RATE,
                 channels: 1,
                 format: "f32le".to_string(),
             }),
