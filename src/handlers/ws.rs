@@ -14,7 +14,9 @@ use crate::{
 };
 use futures::StreamExt;
 
-pub fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+// Must be `async`: axum only implements `Handler` for functions returning a `Future`,
+// even though `on_upgrade` itself returns synchronously (no `.await` needed here).
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
@@ -292,7 +294,7 @@ async fn run_agent_loop(
             model: state.model.clone(),
             stream: true,
             messages: conversation.messages().to_vec(),
-            tools: state.tools.clone(),
+            tools: (*state.tools).clone(),
         };
 
         let llm_started = std::time::Instant::now();

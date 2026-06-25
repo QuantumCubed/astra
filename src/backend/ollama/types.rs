@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use crate::tools::registry::Tool;
 
@@ -24,7 +23,5 @@ pub struct ChatRequest {
     pub model: String,
     pub stream: bool,
     pub messages: Vec<OllamaMessage>,
-    // Shared from AppState (read-only) so building a request per loop iteration is a cheap
-    // Arc clone, not a deep copy of every tool schema. Serializes identically to `Vec<Tool>`.
-    pub tools: Arc<Vec<Tool>>,
+    pub tools: Vec<Tool>,
 }

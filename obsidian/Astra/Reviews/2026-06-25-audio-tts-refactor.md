@@ -69,9 +69,9 @@ None.
 **2026-06-25 — all findings addressed** (refactored on request):
 - **W1**: the `debug_audio.raw` write is commented out in `TtsStream::finish`, kept as ready-to-use scaffolding; the commented form uses `tokio::fs` so re-enabling won't block the runtime.
 - **W2**: sends now go through a `send_frame` helper returning `false` on failure; `run_agent_loop` and `TtsStream` stop the turn when the client disconnects, so synthesis no longer runs for a gone client.
-- **S3**: `ws_handler` is a plain `fn`.
+- **S3**: *not done* — the compiler showed the finding was a false positive: axum's `Handler` is only implemented for functions returning a `Future`, so `ws_handler` must stay `async` despite having no `.await`. Reverted, with a comment explaining why.
 - **S4**: `astra.conf` is parsed once via `load_conf()` into a `HashMap`; thin accessors read from it.
 - **S5**: the speech lifecycle is extracted into a `TtsStream` struct (`feed`/`speak`/`finish`), separate from the LLM loop.
 - **S6**: the model name is now an `OLLAMA_MODEL` config key (default `qwen3.5:9b`).
-- **S7**: `AppState.tools`/`system_prompt` are `Arc<Vec<Tool>>`/`Arc<str>` (and `ChatRequest.tools: Arc<Vec<Tool>>`), so cloning `AppState` per connection is pointer bumps.
+- **S7**: `AppState.tools`/`system_prompt` are `Arc<Vec<Tool>>`/`Arc<str>`, so cloning `AppState` per connection is pointer bumps. `ChatRequest.tools` stays `Vec<Tool>` (serde won't serialize `Arc` without its `rc` feature), so the per-request build deep-clones the two tiny tool schemas — negligible, and the per-connection win is preserved.
 
