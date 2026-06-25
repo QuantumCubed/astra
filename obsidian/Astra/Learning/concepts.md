@@ -290,3 +290,23 @@ Rust's default (`dev`) profile compiles at `opt-level = 0`: no inlining, no SIMD
 Linking two libraries that each bundle their own copy of a C library (here, ggml) raises the spectre of symbol interposition: at load time the dynamic linker might resolve one library's internal calls to the *other's* symbols, mixing incompatible versions. In practice a Rust binary usually avoids this because it does **not** export the symbols of its statically-linked C dependencies into its dynamic symbol table by default (no `-rdynamic`). So whisper's ggml symbols stay private to the executable, and qwen3-tts's `dlopen`'d `libggml.so` resolves its own symbols internally — the two ggml's live in separate worlds and never interpose. A separate, GPU-level concern is mixing **CUDA and Vulkan** compute on one NVIDIA card; that turned out fine here (no measurable contention), but it's worth verifying empirically rather than assuming, since the driver manages them as distinct clients.
 
 ---
+
+## Streaming Results Out of `spawn_blocking` via a Channel
+
+**Date:** 2026-06-25
+**Context:** Forwarding TTS PCM chunks to the WebSocket as they're decoded, from inside a blocking synthesis call
+**Source:** Claude
+
+`spawn_blocking` normally hands back a single value when its closure finishes — fine for "compute one thing," but useless when a long blocking call produces output *incrementally* and you want to forward it as it appears. The pattern is to give the blocking closure the sender half of a `tokio::sync::mpsc` channel; the closure (on a blocking thread) sends each piece as it's produced, while the async side `recv().await`s them concurrently and acts on each. A `tokio` `UnboundedSender` can be sent to from any thread, including a non-async one, so it bridges blocking-world output into the async runtime without waiting for the whole job to finish. You still keep the returned `JoinHandle` to await completion and surface errors once the stream drains.
+
+---
+
+## Gapless Streaming Audio with a Web Audio Scheduling Cursor
+
+**Date:** 2026-06-25
+**Context:** Playing TTS PCM chunks in the browser as they stream in, instead of buffering and playing one blob
+**Source:** Claude
+
+Calling `source.start()` with no argument plays "now," so firing it per chunk as chunks arrive makes them overlap or gap — there's no shared timeline. The fix is a *scheduling cursor*: keep a `nextStartTime`, and for each chunk create an `AudioBufferSourceNode` and `start(nextStartTime)`, then advance `nextStartTime += buffer.duration`. That schedules chunks exactly back-to-back on the AudioContext's high-resolution clock, gapless, even though they arrive at irregular times. Guard with `start(max(nextStartTime, currentTime))` so a buffer underrun (the cursor falling behind real time) restarts at "now" instead of scheduling in the past. The same clock lets you sync *other* events to the audio — e.g. revealing a sentence's transcript via a timer set to that chunk's scheduled start time.
+
+---

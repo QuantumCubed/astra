@@ -284,6 +284,16 @@ A log of significant technical and architectural decisions, including the reason
 
 ---
 
+## 2026-06-25 — Sub-sentence TTS streaming + transcript synced to audio
+
+**Decision:** Stream TTS audio sub-sentence and reveal the transcript in lockstep with playback. Server: `synthesize_sentence` → `synthesize_sentence_streaming`, which drives the crate's `generate_with_voice_streaming` and forwards each decoded PCM chunk (~every 4 codec frames ≈ 320 ms) to the client as its own binary frame from inside `spawn_blocking` via a `tokio::mpsc` channel. A new `tts_sentence` protocol message (the spoken, markdown-stripped text) is sent before each sentence's chunks. Web client (`astra-web`): a Web Audio **scheduling cursor** plays chunks gapless as they arrive, and each sentence's text is revealed by a timer set to that chunk's scheduled play time — so text appears exactly as it's spoken.
+
+**Reasoning:** At RTF < 1 the audio keeps up once it starts, but whole-sentence synthesis still cost multiple seconds of time-to-first-audio on long sentences; per-chunk streaming drops that to a few hundred ms. The transcript can't be synced client-side (the PCM stream has no sentence boundaries), so the server marks each sentence; revealing on the Web Audio clock — not on receipt — keeps text aligned to speech even as the synthesis buffer runs ahead of playback. The old client buffered every frame and played one blob at `tts_end`; that path is removed.
+
+**Consequences:** `tts_start`/`tts_sentence` are now required by the web client (it waits for `tts_start` to learn the sample rate), so server + client must be deployed together. The displayed transcript is the spoken (stripped) text, not full markdown. Per-word sync would need finer markers; per-sentence is the current granularity.
+
+---
+
 ## 2026-06-13 — Axum with shared `AppState` for tool registry
 
 **Decision:** Tools are registered at startup into `AppState`, which is cloned into every request via Axum's `State` extractor.

@@ -85,7 +85,7 @@ Error codes are deferred — defined when the full set of error cases is known.
 - [x] Implement STT in `backend/audio/stt.rs`
 - [x] Implement TTS in `backend/audio/tts.rs`
 - [x] Stream TTS audio chunks back as binary frames (per-sentence)
-- [ ] Sub-sentence streaming via `generate_with_voice_streaming` (lower time-to-first-audio)
+- [x] Sub-sentence streaming via `generate_with_voice_streaming` — + per-sentence `tts_sentence` transcript sync; web client plays gapless via a Web Audio scheduling cursor
 - [ ] Voice activity detection — deferred; push-to-talk used initially
 - [ ] Interruption handling — user speaks while assistant is responding
 

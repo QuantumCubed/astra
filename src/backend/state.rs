@@ -7,16 +7,19 @@ use crate::backend::audio::{
     tts::{load_tts_model, load_tts_voice_file},
 };
 use crate::backend::config::{
-    load_ollama_url, load_system_prompt, load_tts_max_tokens, load_tts_quant, load_tts_voice,
-    load_whisper_model_path,
+    load_conf, load_system_prompt, ollama_model, ollama_url, tts_max_tokens, tts_quant, tts_voice,
+    whisper_model_path,
 };
 use crate::tools::registry::{register_tools, Tool};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub tools: Vec<Tool>,
-    pub system_prompt: String,
+    // Read-only after startup and shared across every connection, so the heavy fields sit
+    // behind `Arc` — cloning `AppState` per connection is then just pointer bumps.
+    pub tools: Arc<Vec<Tool>>,
+    pub system_prompt: Arc<str>,
     pub ollama_url: String,
+    pub model: String,
     pub client: reqwest::Client,
     pub whisper_ctx: Arc<WhisperContext>,
     // generate_with_voice takes &mut self, so the engine lives behind a Mutex; the
@@ -28,11 +31,14 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new() -> Self {
+        let conf = load_conf();
+
+        let whisper_path = whisper_model_path(&conf)
+            .expect("WHISPER_MODEL missing from .astra/astra.conf")
+            .to_string();
         let started = std::time::Instant::now();
-        let whisper_ctx = tokio::task::spawn_blocking(|| {
-            let path = load_whisper_model_path()
-                .expect("failed to load WHISPER_MODEL from .astra/astra.conf");
-            load_whisper_ctx(&path).expect("failed to load Whisper STT model")
+        let whisper_ctx = tokio::task::spawn_blocking(move || {
+            load_whisper_ctx(&whisper_path).expect("failed to load Whisper STT model")
         })
         .await
         .expect("whisper init panicked");
@@ -41,27 +47,31 @@ impl AppState {
         // qwen3-tts's `new` is genuinely async (it awaits a model auto-download), so unlike
         // any-tts we await it directly — no nested-runtime workaround. The synchronous model
         // load it then does briefly blocks this startup worker, which is fine before we serve.
-        let tts_quant = load_tts_quant().unwrap_or_else(|| "none".to_string());
-        let tts_max_steps = load_tts_max_tokens().unwrap_or(512);
+        let tts_quant = tts_quant(&conf).unwrap_or("none").to_string();
+        let tts_max_steps = tts_max_tokens(&conf).unwrap_or(512);
         let started = std::time::Instant::now();
         let tts = load_tts_model(tts_quant, tts_max_steps)
             .await
             .expect("failed to load Qwen3-TTS engine");
         tracing::info!("TTS model loaded in {:.1}s", started.elapsed().as_secs_f32());
 
-        let tts_voice_name = load_tts_voice().unwrap_or_else(|_| "ryan".to_string());
-        let tts_voice = load_tts_voice_file(&tts_voice_name)
-            .unwrap_or_else(|e| panic!("failed to load TTS voice '{tts_voice_name}': {e}"));
+        let voice_name = tts_voice(&conf).unwrap_or("ryan");
+        let voice = load_tts_voice_file(voice_name)
+            .unwrap_or_else(|e| panic!("failed to load TTS voice '{voice_name}': {e}"));
 
         Self {
-            ollama_url: load_ollama_url()
-                .expect("failed to load OLLAMA_ENDPOINT from .astra/astra.conf"),
-            tools: register_tools(),
-            system_prompt: load_system_prompt().expect("failed to load config files"),
+            ollama_url: ollama_url(&conf)
+                .expect("OLLAMA_ENDPOINT missing from .astra/astra.conf")
+                .to_string(),
+            model: ollama_model(&conf).unwrap_or("qwen3.5:9b").to_string(),
+            tools: Arc::new(register_tools()),
+            system_prompt: load_system_prompt()
+                .expect("failed to load config files")
+                .into(),
             client: reqwest::Client::new(),
             whisper_ctx,
             tts: Arc::new(Mutex::new(tts)),
-            tts_voice: Arc::new(tts_voice),
+            tts_voice: Arc::new(voice),
         }
     }
 }

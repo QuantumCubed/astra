@@ -9,6 +9,15 @@ updated: 2026-06-25
 
 ---
 
+## 2026-06-25 — Streaming TTS + transcript synced to audio; web client playback
+
+- **Sub-sentence streaming (server):** `synthesize_sentence` → `synthesize_sentence_streaming` — drives the crate's `generate_with_voice_streaming` with a `tokio::mpsc` channel, forwarding each decoded PCM chunk (~every 4 frames ≈ 320 ms) to the client as its own binary frame from inside `spawn_blocking`. Added a chunk-count + first-chunk-latency to the RTF log to prove streaming. Added `[profile.dev.package."*"] opt-level = 3` so dev builds aren't the RTF-8 trap.
+- **Transcript sync:** new `tts_sentence` protocol message (the spoken/stripped text) sent before each sentence's chunks. Time-to-first-audio dropped from ~4 s (whole sentence) to a few hundred ms.
+- **Web client (`astra-web`, React/TS):** rewrote `audio/playback.ts` as a Web Audio **scheduling cursor** (`startTtsStream`/`enqueueChunk`/`endTtsStream`) — chunks play gapless, back-to-back, as they arrive; `context/ws.tsx` plays each binary frame on arrival and reveals each sentence's text via a timer set to its scheduled play time; dropped the old buffer-all-then-play-at-`tts_end` path; `useAudio.ts` mirrors playback state from `speakingId`. Confirmed working end-to-end ("works great").
+- **Found (deferred):** the mic button does nothing over plain-HTTP LAN — `navigator.mediaDevices.getUserMedia` requires a secure context (HTTPS or `localhost`), and `startRecording`'s silent `catch` hid the failure. Not caused by the TTS work (recording logic unchanged). Fix later via HTTPS / localhost.
+
+---
+
 ## 2026-06-25 — TTS → Qwen3-TTS-Rust crate; realtime (RTF 0.80) on the server
 
 - Migrated TTS from `any-tts` (Candle, RTF ~2.5) to the **`cgisky1980/Qwen3-TTS-Rust`** crate — same model family as GGUF via llama.cpp (Vulkan) + ONNX decoder. Git dep pinned to a rev; `ort` pinned `=2.0.0-rc.11`; `features=["vulkan"]`.

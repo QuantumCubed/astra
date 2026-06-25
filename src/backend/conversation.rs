@@ -9,11 +9,11 @@ pub struct Conversation {
 }
 
 impl Conversation {
-    pub fn new(system_prompt: String) -> Self {
+    pub fn new(system_prompt: &str) -> Self {
         Self {
             history: vec![OllamaMessage {
                 role: Role::System,
-                content: system_prompt,
+                content: system_prompt.to_string(),
                 tool_calls: None,
             }],
             max_tokens: CONTEXT_WINDOW - RESPONSE_BUFFER,

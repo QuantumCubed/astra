@@ -9,13 +9,15 @@ updated: 2026-06-25
 
 ## In Progress
 
-- [ ] Sub-sentence TTS streaming — switch `generate_with_voice` → `generate_with_voice_streaming` so the first audio arrives in ~hundreds of ms instead of after the whole sentence
+- [ ] Full mic → STT → LLM → TTS round-trip test with the web client (blocked: mic capture needs a secure context — see Backlog)
 
 ## Backlog
 
 ### Phase 2 — Voice Pipeline
 
-- [ ] End-to-end voice path test with a real client (mic → STT → LLM → TTS)
+- [ ] Microphone capture fails over plain-HTTP LAN — `getUserMedia` needs a secure context (HTTPS or `localhost`); serve the web client over HTTPS (mkcert/tunnel) for LAN mic access
+- [ ] Surface mic-capture errors in the web client — `startRecording`'s silent `catch` hides secure-context / permission / no-device failures (the button just looks dead)
+- [ ] (Minor) Web client: guard the overlapping-response case where a new reply's `speakingId` can be cleared by the previous reply's last-chunk `onended`
 - [ ] Interruption handling — user speaks while the assistant is responding
 - [ ] (Deferred, only if needed) GPU ONNX decode — would need a crate fork to add a CUDA execution provider; unnecessary while RTF < 1
 
@@ -27,6 +29,9 @@ updated: 2026-06-25
 
 ## Done
 
+- [x] Sub-sentence TTS streaming — `synthesize_sentence_streaming` forwards PCM chunks (~320 ms) via a `tokio::mpsc` channel as the decoder emits them; web client plays them gapless via a Web Audio scheduling cursor (replaces buffer-then-play)
+- [x] Transcript synced to audio — new `tts_sentence` protocol marker; web client reveals each sentence's text on the Web Audio clock as it's spoken
+- [x] Web client (`astra-web`) streaming playback rework — `playback.ts` cursor, `ws.tsx` per-frame play + `tts_start`/`tts_sentence` handling, dropped the `tts_end` buffer/merge
 - [x] TTS migrated to the `Qwen3-TTS-Rust` crate (GGUF/llama.cpp + ONNX) — `Arc<Mutex<TtsEngine>>`, async load, per-sentence synthesis; **RTF 0.80 on the server (realtime)**; replaced `any-tts` (see Decisions 2026-06-25)
 - [x] Diagnosed the debug-build RTF-8 cliff → `--release` (RTF 0.80); added `[profile.dev.package."*"] opt-level = 3`; ruled out CUDA/Vulkan contention as a red herring
 - [x] Validated whisper-rs (CUDA) + qwen3-tts (Vulkan) + resident Ollama 9B coexist on one GPU in one process

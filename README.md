@@ -29,13 +29,14 @@ All runtime config lives in `.astra/` at the project root.
 
 ```
 OLLAMA_ENDPOINT=http://<your-ollama-host>:11434
+OLLAMA_MODEL=qwen3.5:9b                                 # optional (default: qwen3.5:9b)
 WHISPER_MODEL=.astra/models/stt/ggml-base.en.bin
 TTS_VOICE=ryan                                          # speaker: .astra/models/tts/speakers/<name>.json
 TTS_MAX_TOKENS=512                                      # cap on generation steps (codec frames) per sentence
 TTS_QUANT=none                                          # GGUF quant: none | q5_k_m | q8_0 (q5_k_m saves ~1.7GB VRAM)
 ```
 
-The server will fail at startup with a clear error if `OLLAMA_ENDPOINT` or `WHISPER_MODEL` are missing. `TTS_VOICE` defaults to `ryan` if absent; `TTS_MAX_TOKENS` and `TTS_QUANT` are optional TTS tuning knobs. Whisper model files (`.ggml` format) come from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp); `ggml-base.en.bin` is a good starting point (~142MB). For TTS, the Qwen3-TTS model files live in `.astra/models/tts/` (`gguf/`, `onnx/`, `tokenizer/` subdirs), speaker profiles in `.astra/models/tts/speakers/<name>.json`, and the dlopen'd llama.cpp + onnxruntime shared libraries in `./runtime/` at the project root (resolved relative to the working directory). **Run with `cargo run --release`** — a debug build is ~10× slower for TTS.
+The server will fail at startup with a clear error if `OLLAMA_ENDPOINT` or `WHISPER_MODEL` are missing. `OLLAMA_MODEL` defaults to `qwen3.5:9b` and `TTS_VOICE` to `ryan` if absent; `TTS_MAX_TOKENS` and `TTS_QUANT` are optional TTS tuning knobs. Whisper model files (`.ggml` format) come from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp); `ggml-base.en.bin` is a good starting point (~142MB). For TTS, the Qwen3-TTS model files live in `.astra/models/tts/` (`gguf/`, `onnx/`, `tokenizer/` subdirs), speaker profiles in `.astra/models/tts/speakers/<name>.json`, and the dlopen'd llama.cpp + onnxruntime shared libraries in `./runtime/` at the project root (resolved relative to the working directory). **Run with `cargo run --release`** — a debug build is ~10× slower for TTS.
 
 **`.astra/core/`** — hard behavioral constraints injected into every Ollama request (identity, tool rules, behavior). Loaded first.
 
@@ -111,12 +112,13 @@ All messages share a common envelope:
 | `audio_end` | Client → Server | `{}` — signals end of mic audio (push-to-talk) |
 | `transcript` | Server → Client | `{ "text": "..." }` — STT result from Whisper |
 | `tts_start` | Server → Client | `{ "sample_rate": 24000, "channels": 1, "format": "f32le" }` — start of TTS audio stream, sent before the first PCM frame |
+| `tts_sentence` | Server → Client | `{ "text": "..." }` — the spoken text of the sentence whose PCM frames follow, so a client can reveal the transcript in sync with the audio |
 | `tts_end` | Server → Client | `{ "sample_rate": 24000, "channels": 1, "format": "f32le" }` — signals end of TTS audio stream |
 | `error` | Server → Client | `{ "message": "...", "code": "..." }` |
 
 `done: true` on a `text_chunk` means the response for that `request_id` is complete. The WebSocket connection stays open.
 
-**Audio** is not a JSON message type. Raw PCM audio travels as binary WebSocket frames — no wrapper. Incoming mic audio is 16kHz mono 16-bit; outgoing TTS is 24kHz. JSON control messages (`audio_end`, `transcript`, `tts_end`) coordinate the pipeline.
+**Audio** is not a JSON message type. Raw PCM audio travels as binary WebSocket frames — no wrapper. Incoming mic audio is 16kHz mono 16-bit; outgoing TTS is 24kHz. JSON control messages (`audio_end`, `transcript`, `tts_start`, `tts_sentence`, `tts_end`) coordinate the pipeline. TTS audio streams sub-sentence: each sentence is preceded by a `tts_sentence` marker, then its PCM arrives as several binary frames as it is synthesized.
 
 ## Commands
 
@@ -139,7 +141,7 @@ cargo clippy  # lint
 | Phase | Goal | Status |
 |---|---|---|
 | 1 | WebSocket Foundation — transport, protocol, conversation state, config | Complete |
-| 2 | Voice Interface — STT/TTS, audio frames, push-to-talk, TTS streaming | In progress (pipeline realtime; sub-sentence streaming next) |
+| 2 | Voice Interface — STT/TTS, audio frames, push-to-talk, TTS streaming | In progress (realtime streaming + synced transcript working; mic over LAN needs HTTPS) |
 | 3 | Tool Layer — real tools, structured error handling, per-tool modules | Backlog |
 | 4 | Web Client — browser-based text/voice UI | Pending |
 | 5 | Agents & Expansion — multi-step agents, smart home, mobile/desktop clients | Pending |
