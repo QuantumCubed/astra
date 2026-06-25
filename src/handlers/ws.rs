@@ -162,10 +162,14 @@ async fn speak_sentence(
     let (mut chunks, handle) =
         synthesize_sentence_streaming(state.tts.clone(), state.tts_voice.clone(), text);
     let mut n_samples = 0usize;
+    let mut n_chunks = 0usize;
+    let mut first_chunk_s: Option<f32> = None;
     while let Some(chunk) = chunks.recv().await {
         if chunk.is_empty() {
             continue;
         }
+        first_chunk_s.get_or_insert_with(|| started.elapsed().as_secs_f32());
+        n_chunks += 1;
         n_samples += chunk.len();
         let bytes: Vec<u8> = chunk.iter().flat_map(|s| s.to_le_bytes()).collect();
         all_samples.extend_from_slice(&chunk);
@@ -176,9 +180,12 @@ async fn speak_sentence(
         Ok(Ok(())) => {
             let synth_s = started.elapsed().as_secs_f32();
             let audio_s = n_samples as f32 / TTS_SAMPLE_RATE as f32;
+            // n_chunks > 1 with a sub-second first chunk = the server is genuinely streaming
+            // PCM out progressively (not one blob at the end). One chunk = not streaming.
             tracing::info!(
-                "TTS: {audio_s:.1}s audio in {synth_s:.1}s (RTF {:.2})",
-                synth_s / audio_s.max(0.01)
+                "TTS: {audio_s:.1}s audio in {synth_s:.1}s (RTF {:.2}); {n_chunks} chunks, first at {:.2}s",
+                synth_s / audio_s.max(0.01),
+                first_chunk_s.unwrap_or(synth_s)
             );
         }
         Ok(Err(e)) => {
