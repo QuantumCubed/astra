@@ -7,6 +7,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1"
 # Vulkan GPU backend — libggml-vulkan.so already shipped in the runtime/ tarball, so we can
 # reach the 3070 without a CUDA-from-source build. (CPU RTF was ~4.0 — too slow.)
 qwen3-tts = { git = "https://github.com/cgisky1980/Qwen3-TTS-Rust", features = ["vulkan"] }
