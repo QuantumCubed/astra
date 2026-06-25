@@ -7,7 +7,7 @@ use crate::{
         audio::{stt::transcribe, tts::{strip_markdown, synthesize_sentence_streaming, take_sentences, TTS_SAMPLE_RATE}},
         conversation::Conversation,
         ollama::{client, types::ChatRequest},
-        protocol::{Envelope, ErrorPayload, Message, TextChunkPayload, TranscriptPayload, TtsEndPayload, TtsStartPayload},
+        protocol::{Envelope, ErrorPayload, Message, TextChunkPayload, TranscriptPayload, TtsEndPayload, TtsSentencePayload, TtsStartPayload},
         state::AppState,
     },
     tools::dispatch,
@@ -154,6 +154,17 @@ async fn speak_sentence(
             let _ = socket.send(WsFrame::Text(s.into())).await;
         }
         *tts_started = true;
+    }
+
+    // Tell the client which sentence is about to play, so it can reveal the matching
+    // transcript text in sync with the audio. We send the spoken (markdown-stripped) text
+    // so the displayed transcript matches what's actually heard.
+    let marker = Envelope {
+        request_id: request_id.clone(),
+        message: Message::TtsSentence(TtsSentencePayload { text: text.clone() }),
+    };
+    if let Ok(s) = serde_json::to_string(&marker) {
+        let _ = socket.send(WsFrame::Text(s.into())).await;
     }
 
     // Stream the sentence: forward each PCM chunk the moment the decoder emits it (~every
