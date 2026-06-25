@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-24
+updated: 2026-06-25
 ---
 
 # Todos
@@ -9,18 +9,15 @@ updated: 2026-06-24
 
 ## In Progress
 
-- [ ] TTS latency: get RTF < 1 on the dev GPU — `TTS_DTYPE=f16` A/B, then a faster / non-autoregressive model
+- [ ] Sub-sentence TTS streaming — switch `generate_with_voice` → `generate_with_voice_streaming` so the first audio arrives in ~hundreds of ms instead of after the whole sentence
 
 ## Backlog
 
 ### Phase 2 — Voice Pipeline
 
-- [ ] Download Whisper `ggml-base.en.bin` model file to `.astra/models/stt/`
-- [ ] End-to-end voice path test with a real client
-- [ ] Re-enable per-sentence interleaving once RTF < 1 (machinery kept in `tts.rs`/`ws.rs`)
-- [ ] Investigate why `Qwen3-TTS-12Hz-0.6B-CustomVoice` failed to load/run (reverted to 1.7B)
-- [ ] If RTF stays > 1: evaluate a non-autoregressive backend (Kokoro, RTF ~0.05)
-- [ ] (Future) Fork any-tts to expose a streaming synthesis API for Qwen3-TTS
+- [ ] End-to-end voice path test with a real client (mic → STT → LLM → TTS)
+- [ ] Interruption handling — user speaks while the assistant is responding
+- [ ] (Deferred, only if needed) GPU ONNX decode — would need a crate fork to add a CUDA execution provider; unnecessary while RTF < 1
 
 ### Phase 3 — Tool Layer
 
@@ -30,6 +27,11 @@ updated: 2026-06-24
 
 ## Done
 
+- [x] TTS migrated to the `Qwen3-TTS-Rust` crate (GGUF/llama.cpp + ONNX) — `Arc<Mutex<TtsEngine>>`, async load, per-sentence synthesis; **RTF 0.80 on the server (realtime)**; replaced `any-tts` (see Decisions 2026-06-25)
+- [x] Diagnosed the debug-build RTF-8 cliff → `--release` (RTF 0.80); added `[profile.dev.package."*"] opt-level = 3`; ruled out CUDA/Vulkan contention as a red herring
+- [x] Validated whisper-rs (CUDA) + qwen3-tts (Vulkan) + resident Ollama 9B coexist on one GPU in one process
+- [x] Provisioned TTS model/runtime/speakers (`.astra/models/tts/`, `./runtime`); `TTS_QUANT` knob replaces `TTS_DTYPE`/`TTS_MODEL_ID`
+- [x] Whisper `ggml-base.en.bin` provisioned to `.astra/models/stt/`
 - [x] TTS migrated to `any-tts v0.1.2` / `ModelType::Qwen3Tts` — `Arc<dyn TtsModel>`, `spawn_blocking` load, BF16; replaced `kokoro-tiny` (see Decisions 2026-06-24)
 - [x] Added runtime TTS knobs: `TTS_VOICE` (renamed from `KOKORO_VOICE`), `TTS_MAX_TOKENS`, `TTS_MODEL_ID`, `TTS_DTYPE`
 - [x] Added `TtsStart(TtsStartPayload)` protocol message — audio format sent before the first chunk

@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-24
+updated: 2026-06-25
 ---
 
 # Architecture
@@ -35,15 +35,15 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init, `tracing_subscriber` logging init |
-| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, shared reqwest client, `Arc<WhisperContext>`, `Arc<dyn TtsModel>` (any-tts), `tts_voice`, `tts_max_tokens` |
-| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys (`OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_MODEL_ID`, `TTS_DTYPE`) |
+| `src/backend/state.rs` | `AppState` — tools, system prompt, Ollama URL, shared reqwest client, `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>` (qwen3-tts), `Arc<VoiceFile>` speaker |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; reads `astra.conf` keys (`OLLAMA_ENDPOINT`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_QUANT`) |
 | `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
 | `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
 | `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
 | `src/backend/ollama/types.rs` | `OllamaMessage`, `ChatRequest`, `Role` enum |
 | `src/backend/audio.rs` | Audio module root |
 | `src/backend/audio/stt.rs` | STT — `load_whisper_ctx` + `transcribe` (whisper-rs 0.16.0, `spawn_blocking`) |
-| `src/backend/audio/tts.rs` | TTS — `load_tts_model` + `synthesize_sentence` (any-tts / Qwen3-TTS, `spawn_blocking`); `strip_markdown` + `take_sentences` pre-process LLM output |
+| `src/backend/audio/tts.rs` | TTS — `load_tts_model` + `synthesize_sentence` (qwen3-tts `TtsEngine`, `spawn_blocking`); `strip_markdown` + `take_sentences` pre-process LLM output |
 | `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop, audio buffer, full voice pipeline |
 | `src/tools/registry.rs` | `Tool`/`ToolFunction` structs, `register_tools()` |
 | `src/tools/dispatch.rs` | Routes tool call by name to implementation |
@@ -100,7 +100,7 @@ All text frames use a JSON envelope:
 
 **Binary frames** carry raw PCM audio — no JSON wrapper. Incoming = mic audio (16kHz mono 16-bit LE); outgoing = TTS output (f32 LE, sample rate reported in `TtsEndPayload.sample_rate`).
 
-## Audio Pipeline (Phase 2 — working; TTS latency being tuned)
+## Audio Pipeline (Phase 2 — working, realtime)
 
 ```
 binary WS frames (PCM chunks)
@@ -108,15 +108,15 @@ binary WS frames (PCM chunks)
             └── accumulate in audio buffer until AudioEnd JSON message
                     └── backend::audio::stt (whisper-rs / whisper.cpp FFI)
                             └── transcript text → run_agent_loop
-                                    └── LLM response text
-                                            └── backend::audio::tts (any-tts / Qwen3-TTS)
+                                    └── LLM response text (streamed)
+                                            └── per sentence: backend::audio::tts (qwen3-tts)
                                                     └── TtsStart → PCM binary frame(s) → TtsEnd
 ```
 
-**STT:** `whisper-rs` v0.16.0 — whisper.cpp via C FFI. Requires LLVM/libclang on Windows for the bindgen build step.
-**TTS:** `any-tts` v0.1.2 with `ModelType::Qwen3Tts` (Qwen3-TTS-12Hz-1.7B-CustomVoice) — a Candle-native, end-to-end neural model. Weights auto-download from HuggingFace (~4.5 GB) on first run and load in BF16. Stored as `Arc<dyn TtsModel>` (no Mutex — `synthesize` takes `&self`). Output is f32 PCM at the model's native rate (`tts.sample_rate()`, 24 kHz).
+**STT:** `whisper-rs` v0.16.0 — whisper.cpp via C FFI (CUDA). Requires LLVM/libclang on Windows for the bindgen build step.
+**TTS:** the [`Qwen3-TTS-Rust`](https://github.com/cgisky1980/Qwen3-TTS-Rust) crate — Qwen3-TTS as GGUF via llama.cpp (Vulkan) for the talker/predictor + an ONNX audio decoder (CPU on Linux). Stored as `Arc<Mutex<TtsEngine>>` (synthesis takes `&mut self`); the speaker is an `Arc<VoiceFile>` loaded once. Output is f32 PCM at 24 kHz (`TTS_SAMPLE_RATE` const). Native libs are dlopen'd from `./runtime` (process CWD); model files in `.astra/models/tts/`, speaker JSONs in `.astra/models/tts/speakers/`.
 
-**Latency:** Qwen3-TTS is autoregressive; on the dev RTX 3070 it runs at **RTF ~2.5** (synthesis ~2.5× slower than realtime), too slow for smooth streaming. Per-sentence interleaving (`take_sentences` + `speak_sentence`) is implemented but **temporarily disabled** (whole-clip synthesis) while tuning. Instrumentation logs per-synth RTF and LLM first-token timing. Runtime knobs: `TTS_MODEL_ID`, `TTS_DTYPE`, `TTS_MAX_TOKENS`. See [[Decisions]] (2026-06-24).
+**Latency:** **RTF ~0.80 on the Linux server (RTX 5060 Ti, Vulkan)** — under realtime, coexisting with whisper (CUDA) + the resident Ollama 9B (CUDA) on the same GPU. Synthesis is per-sentence (`take_sentences` + `speak_sentence`), each sentence streamed as its own binary frame. **Must be built `--release`** — a debug build runs ~10× slower (RTF ~8) because the crate's per-frame Rust starves the GPU; `[profile.dev.package."*"] opt-level = 3` mitigates dev builds. Instrumentation logs per-synth RTF + LLM first-token timing. Knob: `TTS_QUANT` (q5_k_m saves ~1.7 GB VRAM). See [[Decisions]] (2026-06-25).
 
 ## Current Tools
 

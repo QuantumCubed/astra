@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-24
+updated: 2026-06-25
 ---
 
 # Decisions
@@ -259,6 +259,28 @@ A log of significant technical and architectural decisions, including the reason
 - `Qwen3-TTS-12Hz-0.6B-CustomVoice` exists and is same-architecture, but didn't work in practice — reverted to the default 1.7B.
 
 **Consequence:** added runtime knobs `TTS_MODEL_ID`, `TTS_DTYPE`, `TTS_MAX_TOKENS` so model/dtype/length are tunable via `astra.conf` + restart, avoiding slow WSL candle rebuilds.
+
+**Superseded by:** 2026-06-25 — switch to the `Qwen3-TTS-Rust` crate (GGUF/llama.cpp), which hits RTF < 1 (below).
+
+---
+
+## 2026-06-25 — Switch TTS to the `Qwen3-TTS-Rust` crate (GGUF/llama.cpp + ONNX); realtime achieved
+
+**Decision:** Replace `any-tts` (Candle) with the [`cgisky1980/Qwen3-TTS-Rust`](https://github.com/cgisky1980/Qwen3-TTS-Rust) crate (git dep, pinned rev, `features=["vulkan"]`, `ort` pinned `=2.0.0-rc.11`). Same Qwen3-TTS model family, but run as GGUF via llama.cpp (Vulkan GPU) for the talker/predictor + an ONNX audio decoder. `AppState.tts`: `Arc<dyn TtsModel>` → `Arc<Mutex<TtsEngine>>` (synthesis takes `&mut self`); load is a real `async fn` (awaited directly, no `spawn_blocking`); synthesis runs in `spawn_blocking` holding the std mutex. Voice = a `VoiceFile` speaker profile loaded once at startup (`Arc<VoiceFile>`). Config: `TTS_QUANT` (none|q5_k_m|q8_0) replaces `TTS_DTYPE`/`TTS_MODEL_ID`; `TTS_MAX_TOKENS` → `set_max_steps`. Native libs (`libllama.so`, `libggml-*.so`, `libonnxruntime.so`) are dlopen'd from `./runtime` at the process CWD; model files live in `.astra/models/tts/` and speaker JSONs in `.astra/models/tts/speakers/`.
+
+**Reasoning:** any-tts/Candle was stuck at RTF ~2.5 (autoregressive BF16, no quantization). GGUF quantization via llama.cpp + GPU offload is the proven realtime path for this model family. On the Linux server (RTX 5060 Ti, Vulkan) the integrated pipeline measures **RTF 0.80** — under realtime — with whisper (CUDA) and the resident Ollama 9B (CUDA) coexisting on the same GPU. The three native stacks (whisper.cpp static + llama.cpp dlopen + onnxruntime dlopen) coexist in one process without symbol clashes (Rust doesn't `-rdynamic`, so the two ggml's don't interpose).
+
+**Findings that shaped this (and corrected earlier guesses):**
+- **`--release` is mandatory.** A debug build ran at RTF ~8; release dropped it to ~0.8. The per-frame hot path (projection matmul, sampler over the vocab, 16 predictor samplings, ONNX tensor marshalling) is the *crate's own Rust*, which debug-mode pessimizes ~10×, starving the GPU between kernels. Added `[profile.dev.package."*"] opt-level = 3` so dev builds aren't a footgun.
+- **CUDA/Vulkan contention was a red herring.** RTF 0.80 holds with Ollama (CUDA) + whisper (CUDA) resident alongside the Vulkan TTS — coexistence is fine. No CUDA-llama build needed.
+- **Quantization barely moves RTF here** (the 1.4B talker isn't memory-bound on a fast 16 GB card), but Q5 saves ~1.7 GB VRAM for sharing the card with the 9B LLM — kept for that reason.
+- **The crate is Windows-GPU-first:** its only GPU ONNX path is DirectML (`#[cfg(windows)]`); on Linux the ONNX *decoder* is hardcoded to CPU. Acceptable (not the bottleneck at RTF 0.8), and why the crate's 0.55 benchmark — a Windows number — doesn't transfer.
+- The crate **does** expose a streaming API (`generate_with_voice_streaming`, chunks via a tokio channel) — adopted next to cut time-to-first-audio.
+
+**Tradeoffs / consequences:**
+- **Provisioning is manual:** `runtime/` (native libs) must sit at astra's CWD; model + speaker files under `.astra/models/tts/`. Documented in the README.
+- **Pinned to a young crate at a specific rev** — upstream churn is a risk; the rev pin and `ort` pin guard against it.
+- **GPU ONNX decode deferred** (would need a crate fork to add a CUDA EP) — unnecessary while RTF < 1.
 
 ---
 

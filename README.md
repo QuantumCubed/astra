@@ -10,7 +10,7 @@ Astra bridges WebSocket clients to a local Ollama LLM. It maintains per-connecti
 
 ## Status
 
-Phase 1 (WebSocket Foundation) is complete. Phase 2 (Voice Interface) is in progress — the full STT → LLM → TTS pipeline works; TTS uses Qwen3-TTS via `any-tts`, and its realtime latency is being tuned.
+Phase 1 (WebSocket Foundation) is complete. Phase 2 (Voice Interface) is largely working — the full STT → LLM → TTS pipeline runs realtime (RTF ~0.8 on the server). TTS uses Qwen3-TTS via the [`Qwen3-TTS-Rust`](https://github.com/cgisky1980/Qwen3-TTS-Rust) crate (GGUF/llama.cpp + ONNX).
 
 ## Setup
 
@@ -18,7 +18,7 @@ Phase 1 (WebSocket Foundation) is complete. Phase 2 (Voice Interface) is in prog
 
 - [Rust](https://rustup.rs/) (edition 2024)
 - A running [Ollama](https://ollama.com/) instance accessible from the host machine
-- **Linux / WSL2 required** for builds that include `whisper-rs` and `any-tts`. The two crates have a C runtime conflict on Windows MSVC (LNK2038 `/MD` vs `/MT`, via `candle-kernels`/`esaxx-rs`) that has no linker workaround. All audio-enabled builds run on Linux or WSL2 (Ubuntu). CUDA works via WSL2's GPU passthrough.
+- **Linux (or WSL2) for builds and deployment.** STT (`whisper-rs`/whisper.cpp, CUDA) and TTS (the Qwen3-TTS-Rust crate's dlopen'd llama.cpp + onnxruntime, Vulkan) target Linux; the `runtime/` shared libraries are Linux `.so`s. CUDA works natively on Linux and via WSL2 GPU passthrough. (The historical Windows-MSVC blocker was the `any-tts`/candle `/MD` vs `/MT` CRT conflict; any-tts has since been removed.)
 - **Linux build deps:** `sudo apt install -y libasound2-dev` (ALSA, pulled in transitively by the audio crates).
 
 ### Configuration
@@ -30,13 +30,12 @@ All runtime config lives in `.astra/` at the project root.
 ```
 OLLAMA_ENDPOINT=http://<your-ollama-host>:11434
 WHISPER_MODEL=.astra/models/stt/ggml-base.en.bin
-TTS_VOICE=ryan
-TTS_MAX_TOKENS=512
-# TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice   # optional model override (default: 1.7B)
-# TTS_DTYPE=f16                                         # optional: bf16 (default) | f16 | f32
+TTS_VOICE=ryan                                          # speaker: .astra/models/tts/speakers/<name>.json
+TTS_MAX_TOKENS=512                                      # cap on generation steps (codec frames) per sentence
+TTS_QUANT=none                                          # GGUF quant: none | q5_k_m | q8_0 (q5_k_m saves ~1.7GB VRAM)
 ```
 
-The server will fail at startup with a clear error if `OLLAMA_ENDPOINT` or `WHISPER_MODEL` are missing. `TTS_VOICE` defaults to `ryan` if absent; `TTS_MAX_TOKENS`, `TTS_MODEL_ID`, and `TTS_DTYPE` are optional TTS tuning knobs. Whisper model files (`.ggml` format) can be downloaded from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp). `ggml-base.en.bin` is a good starting point (~142MB). Qwen3-TTS model weights (~4.5 GB for the 1.7B) auto-download from HuggingFace on first run — no manual download needed.
+The server will fail at startup with a clear error if `OLLAMA_ENDPOINT` or `WHISPER_MODEL` are missing. `TTS_VOICE` defaults to `ryan` if absent; `TTS_MAX_TOKENS` and `TTS_QUANT` are optional TTS tuning knobs. Whisper model files (`.ggml` format) come from [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp); `ggml-base.en.bin` is a good starting point (~142MB). For TTS, the Qwen3-TTS model files live in `.astra/models/tts/` (`gguf/`, `onnx/`, `tokenizer/` subdirs), speaker profiles in `.astra/models/tts/speakers/<name>.json`, and the dlopen'd llama.cpp + onnxruntime shared libraries in `./runtime/` at the project root (resolved relative to the working directory). **Run with `cargo run --release`** — a debug build is ~10× slower for TTS.
 
 **`.astra/core/`** — hard behavioral constraints injected into every Ollama request (identity, tool rules, behavior). Loaded first.
 
@@ -140,7 +139,7 @@ cargo clippy  # lint
 | Phase | Goal | Status |
 |---|---|---|
 | 1 | WebSocket Foundation — transport, protocol, conversation state, config | Complete |
-| 2 | Voice Interface — STT/TTS, audio frames, push-to-talk, TTS streaming | In progress |
+| 2 | Voice Interface — STT/TTS, audio frames, push-to-talk, TTS streaming | In progress (pipeline realtime; sub-sentence streaming next) |
 | 3 | Tool Layer — real tools, structured error handling, per-tool modules | Backlog |
 | 4 | Web Client — browser-based text/voice UI | Pending |
 | 5 | Agents & Expansion — multi-step agents, smart home, mobile/desktop clients | Pending |

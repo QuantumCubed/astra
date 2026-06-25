@@ -4,7 +4,7 @@ use axum::{
 };
 use crate::{
     backend::{
-        audio::{stt::transcribe, tts::{strip_markdown, synthesize_sentence, take_sentences, TTS_SAMPLE_RATE}},
+        audio::{stt::transcribe, tts::{strip_markdown, synthesize_sentence_streaming, take_sentences, TTS_SAMPLE_RATE}},
         conversation::Conversation,
         ollama::{client, types::ChatRequest},
         protocol::{Envelope, ErrorPayload, Message, TextChunkPayload, TranscriptPayload, TtsEndPayload, TtsStartPayload},
@@ -156,24 +156,36 @@ async fn speak_sentence(
         *tts_started = true;
     }
 
+    // Stream the sentence: forward each PCM chunk the moment the decoder emits it (~every
+    // 320 ms), so audio starts playing long before the whole sentence is synthesized.
     let started = std::time::Instant::now();
-    match synthesize_sentence(state.tts.clone(), state.tts_voice.clone(), text).await {
-        Ok(samples) => {
-            if samples.is_empty() {
-                return;
-            }
+    let (mut chunks, handle) =
+        synthesize_sentence_streaming(state.tts.clone(), state.tts_voice.clone(), text);
+    let mut n_samples = 0usize;
+    while let Some(chunk) = chunks.recv().await {
+        if chunk.is_empty() {
+            continue;
+        }
+        n_samples += chunk.len();
+        let bytes: Vec<u8> = chunk.iter().flat_map(|s| s.to_le_bytes()).collect();
+        all_samples.extend_from_slice(&chunk);
+        let _ = socket.send(WsFrame::Binary(bytes.into())).await;
+    }
+
+    match handle.await {
+        Ok(Ok(())) => {
             let synth_s = started.elapsed().as_secs_f32();
-            let audio_s = samples.len() as f32 / TTS_SAMPLE_RATE as f32;
+            let audio_s = n_samples as f32 / TTS_SAMPLE_RATE as f32;
             tracing::info!(
                 "TTS: {audio_s:.1}s audio in {synth_s:.1}s (RTF {:.2})",
                 synth_s / audio_s.max(0.01)
             );
-            let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-            all_samples.extend_from_slice(&samples);
-            let _ = socket.send(WsFrame::Binary(bytes.into())).await;
+        }
+        Ok(Err(e)) => {
+            send_error(socket, request_id.clone(), "TTS_ERROR", &format!("TTS failed: {e}")).await;
         }
         Err(e) => {
-            send_error(socket, request_id.clone(), "TTS_ERROR", &format!("TTS failed: {e}")).await;
+            send_error(socket, request_id.clone(), "TTS_ERROR", &format!("TTS task failed: {e}")).await;
         }
     }
 }

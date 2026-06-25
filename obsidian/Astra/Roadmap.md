@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-24
+updated: 2026-06-25
 ---
 
 # Roadmap
@@ -71,7 +71,7 @@ Error codes are deferred — defined when the full set of error cases is known.
 
 - **STT/TTS placement:** Server-side, in-process within the Astra binary
 - **STT:** `whisper-rs` v0.16.0 (whisper.cpp via C FFI)
-- **TTS:** `any-tts` v0.1.2 with `ModelType::Qwen3Tts` (Qwen3-TTS-1.7B, Candle-native). Autoregressive → RTF ~2.5 on the dev RTX 3070; realtime needs RTF < 1 (tuning — see [[Decisions]])
+- **TTS:** the [`Qwen3-TTS-Rust`](https://github.com/cgisky1980/Qwen3-TTS-Rust) crate — Qwen3-TTS as GGUF via llama.cpp (Vulkan) + ONNX decode. **RTF ~0.8 on the server (realtime).** Replaced `any-tts`/Candle (RTF ~2.5). See [[Decisions]] 2026-06-25
 - **Audio transport:** Raw PCM binary WebSocket frames (not Opus). 16kHz in, 24kHz out.
 - **Utterance boundaries:** Push-to-talk — client sends `audio_end` JSON message
 
@@ -80,11 +80,12 @@ Error codes are deferred — defined when the full set of error cases is known.
 - [x] Decide STT/TTS placement and crate selection
 - [x] Define audio protocol message types (`AudioEnd`, `Transcript`, `TtsEnd`)
 - [x] Add `whisper-rs` and `any-tts` to `Cargo.toml`
-- [ ] Build `backend/audio/` module (`audio.rs`, `audio/stt.rs`, `audio/tts.rs`)
-- [ ] Handle binary WebSocket frames in `handlers/ws.rs`
-- [ ] Implement STT in `backend/audio/stt.rs`
-- [ ] Implement TTS in `backend/audio/tts.rs`
-- [ ] Stream TTS audio chunks back as binary frames
+- [x] Build `backend/audio/` module (`audio.rs`, `audio/stt.rs`, `audio/tts.rs`)
+- [x] Handle binary WebSocket frames in `handlers/ws.rs`
+- [x] Implement STT in `backend/audio/stt.rs`
+- [x] Implement TTS in `backend/audio/tts.rs`
+- [x] Stream TTS audio chunks back as binary frames (per-sentence)
+- [ ] Sub-sentence streaming via `generate_with_voice_streaming` (lower time-to-first-audio)
 - [ ] Voice activity detection — deferred; push-to-talk used initially
 - [ ] Interruption handling — user speaks while assistant is responding
 

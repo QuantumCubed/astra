@@ -68,27 +68,35 @@ pub fn take_sentences(buf: &mut String) -> Vec<String> {
     sentences
 }
 
-/// Synthesize one chunk of text into 24 kHz f32 PCM.
+/// Synthesize one chunk of text, streaming 24 kHz f32 PCM out through the returned
+/// channel as the decoder produces it (~every 4 codec frames ≈ 320 ms) — so playback can
+/// start long before the whole sentence finishes.
 ///
-/// `generate_with_voice` is a heavy, blocking, autoregressive FFI call that takes
-/// `&mut self`, so the engine lives behind a `Mutex` and the whole synthesis runs on a
-/// blocking thread — holding the (std) lock for its duration, i.e. one synthesis at a
-/// time. The per-sentence frame cap was applied once at load via `set_max_steps`.
-pub async fn synthesize_sentence(
+/// `generate_with_voice_streaming` is a heavy, blocking, autoregressive FFI call that
+/// takes `&mut self`, so it runs on a blocking thread holding the (std) mutex for its
+/// duration (one synthesis at a time). It pushes chunks into the tokio `UnboundedSender`
+/// from its own decoder thread while running. Returns the receiver to drain, plus the
+/// `JoinHandle` to await for completion / error (the channel closes when synthesis ends).
+/// The per-sentence frame cap was applied once at load via `set_max_steps`.
+pub fn synthesize_sentence_streaming(
     tts: Arc<Mutex<TtsEngine>>,
     voice: Arc<VoiceFile>,
     sentence: String,
-) -> anyhow::Result<Vec<f32>> {
-    tokio::task::spawn_blocking(move || {
+) -> (
+    tokio::sync::mpsc::UnboundedReceiver<Vec<f32>>,
+    tokio::task::JoinHandle<anyhow::Result<()>>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Vec<f32>>();
+    let handle = tokio::task::spawn_blocking(move || {
         let mut engine = tts
             .lock()
             .map_err(|_| anyhow::anyhow!("TTS engine mutex poisoned"))?;
-        let audio = engine
-            .generate_with_voice(&sentence, &voice, None)
+        engine
+            .generate_with_voice_streaming(&sentence, &voice, None, Some(tx))
             .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {e}"))?;
-        Ok(audio.samples)
-    })
-    .await?
+        Ok(())
+    });
+    (rx, handle)
 }
 
 pub fn strip_markdown(text: &str) -> String {

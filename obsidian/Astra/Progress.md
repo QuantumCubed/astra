@@ -1,11 +1,23 @@
 ---
 created: 2026-06-13
-updated: 2026-06-24
+updated: 2026-06-25
 ---
 
 # Progress
 
 [[ASTRA|← Home]]
+
+---
+
+## 2026-06-25 — TTS → Qwen3-TTS-Rust crate; realtime (RTF 0.80) on the server
+
+- Migrated TTS from `any-tts` (Candle, RTF ~2.5) to the **`cgisky1980/Qwen3-TTS-Rust`** crate — same model family as GGUF via llama.cpp (Vulkan) + ONNX decoder. Git dep pinned to a rev; `ort` pinned `=2.0.0-rc.11`; `features=["vulkan"]`.
+- De-risked with an isolated spike first (`tts-spike/`) before touching astra: confirmed it builds, runs on the server's RTX 5060 Ti via Vulkan, and clears RTF < 1.
+- Rewrote the synthesis layer: `AppState.tts` `Arc<dyn TtsModel>` → `Arc<Mutex<TtsEngine>>` (`generate_with_voice` takes `&mut self`); `load_tts_model` is async (awaited directly — the crate's `new` is genuinely async, no nested-runtime trap); `synthesize_sentence` runs in `spawn_blocking` holding the std mutex; speaker is `Arc<VoiceFile>` loaded once. `TTS_SAMPLE_RATE` const (24 kHz) replaces the model accessor.
+- Config: `TTS_QUANT` (none|q5_k_m|q8_0) replaces `TTS_DTYPE`/`TTS_MODEL_ID`; `TTS_MAX_TOKENS` → `set_max_steps`. Native libs dlopen'd from `./runtime` (CWD); models in `.astra/models/tts/`, speakers in `.astra/models/tts/speakers/`.
+- **Verified on the server: RTF 0.80** (5.0 s audio in 4.0 s) with whisper (CUDA) + the resident Ollama 9B (CUDA) sharing the GPU — the three native stacks coexist in one process cleanly.
+- **Hard-won lesson:** a debug build runs at RTF ~8; `--release` drops it to ~0.8. The per-frame hot path is the crate's *own Rust* (projection, sampling, ONNX marshalling), which debug-mode pessimizes ~10× and starves the GPU. Added `[profile.dev.package."*"] opt-level = 3`. The mid-debug CUDA/Vulkan-contention theory was wrong — coexistence is fine.
+- Findings: quantization barely moves RTF here (talker isn't memory-bound) but Q5 saves ~1.7 GB VRAM; the crate's GPU ONNX path is DirectML/Windows-only (Linux decode is CPU, but not the bottleneck); the crate exposes a streaming API (`generate_with_voice_streaming`) — next up for time-to-first-audio.
 
 ---
 

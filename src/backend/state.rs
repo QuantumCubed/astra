@@ -20,7 +20,7 @@ pub struct AppState {
     pub client: reqwest::Client,
     pub whisper_ctx: Arc<WhisperContext>,
     // generate_with_voice takes &mut self, so the engine lives behind a Mutex; the
-    // blocking synthesis holds the lock on a spawn_blocking thread (see synthesize_sentence).
+    // blocking synthesis holds the lock on a spawn_blocking thread (see synthesize_sentence_streaming).
     pub tts: Arc<Mutex<TtsEngine>>,
     // Speaker profile, loaded once at startup and shared read-only.
     pub tts_voice: Arc<VoiceFile>,

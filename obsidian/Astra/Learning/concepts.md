@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-24
+updated: 2026-06-25
 ---
 
 # Concepts
@@ -268,5 +268,25 @@ In Rust, async is contagious: if a function you call is `async`, you must either
 **Source:** Claude
 
 Realtime factor (RTF) = synthesis time ÷ audio duration. RTF < 1 means you generate audio faster than it plays; RTF > 1 means you can't keep up. For *streaming* voice this is a hard gate: at RTF > 1 the player drains its buffer faster than the synthesizer refills it, so audio stalls mid-utterance no matter how cleverly you chunk or interleave — interleaving only changes *when* the first audio arrives, not the sustained generation rate. Autoregressive TTS (like Qwen3-TTS) is especially prone to RTF > 1 on modest GPUs because it generates audio codec tokens one at a time, sequentially, so wall-clock cost scales with output length and the parameter count understates it (a "1.7B" autoregressive model can be far slower than a 1.7B one-shot forward pass). The fix for RTF > 1 is fundamentally a faster model or faster hardware — not a software pipeline change.
+
+---
+
+## Debug vs Release: the Optimization Cliff for Compute-Heavy Code
+
+**Date:** 2026-06-25
+**Context:** Astra's TTS ran at RTF ~8 under `cargo run`, but RTF ~0.8 under `cargo run --release` — an 8× gap
+**Source:** Claude
+
+Rust's default (`dev`) profile compiles at `opt-level = 0`: no inlining, no SIMD/autovectorization, and full bounds-checking. For ordinary glue code the difference is invisible, but for tight numeric loops it's routinely 10×+ slower than the `release` profile (`opt-level = 3`). The trap with GPU work is indirect: even when the heavy matmuls run on the GPU, the *per-step CPU glue* (here: a projection matmul, a softmax/penalty sampler over thousands of logits, tensor marshalling) runs in your compiled Rust — and if that glue is unoptimized, the GPU sits idle waiting for the CPU to feed it the next step, so the whole pipeline crawls. Two fixes: always benchmark/deploy with `--release`; and add `[profile.dev.package."*"] opt-level = 3` to `Cargo.toml` to optimize *dependencies* in dev builds while keeping your own crate unoptimized (fast to compile, still debuggable) — ideal when the hot path lives in a dependency.
+
+---
+
+## Coexisting Native Runtimes in One Process (and why Rust usually saves you)
+
+**Date:** 2026-06-25
+**Context:** Whether whisper-rs (static whisper.cpp + CUDA) and qwen3-tts (dlopen'd llama.cpp + Vulkan) — two copies of ggml — would clash in one binary
+**Source:** Claude
+
+Linking two libraries that each bundle their own copy of a C library (here, ggml) raises the spectre of symbol interposition: at load time the dynamic linker might resolve one library's internal calls to the *other's* symbols, mixing incompatible versions. In practice a Rust binary usually avoids this because it does **not** export the symbols of its statically-linked C dependencies into its dynamic symbol table by default (no `-rdynamic`). So whisper's ggml symbols stay private to the executable, and qwen3-tts's `dlopen`'d `libggml.so` resolves its own symbols internally — the two ggml's live in separate worlds and never interpose. A separate, GPU-level concern is mixing **CUDA and Vulkan** compute on one NVIDIA card; that turned out fine here (no measurable contention), but it's worth verifying empirically rather than assuming, since the driver manages them as distinct clients.
 
 ---
