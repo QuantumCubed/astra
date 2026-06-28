@@ -366,6 +366,24 @@ A log of significant technical and architectural decisions, including the reason
 
 ---
 
+## 2026-06-28 — Modular integrations architecture: integration structs own their state and config
+
+**Decision:** Each integration owns its state in a dedicated struct (`HaClient`, future `SpotifyCtx`) rather than spreading raw fields across `AppState`. `AppState` stores `Arc<IntegrationStruct>` references only. Each integration also owns its config loading via a local `config.rs` (`integrations/home/ha/config.rs`, `integrations/spotify/config.rs`), calling the shared `load_conf()` from `backend/config.rs` to parse the file but extracting only its own keys. `backend/config.rs` is trimmed to core concerns: Ollama URL, model, system prompt, Whisper path.
+
+**Reasoning:** `AppState` was growing into a god object — Spotify tokens, device caches, TTS, Whisper, all as raw fields. Each new integration would worsen this. Encapsulating state and config per-integration keeps `AppState` as a thin registry, makes integrations independently testable (no `AppState` dependency), and lets each integration manage its own lifecycle (connect, reconnect, token refresh) without touching `AppState::new()`.
+
+**Migration:** Spotify will be refactored from raw `AppState` fields into a `SpotifyCtx` struct as a follow-up. `SpotifyCtx` rather than `SpotifyClient` — there is no persistent connection to Spotify, only stateless HTTP calls with a cached token; the name reflects that.
+
+---
+
+## 2026-06-28 — Home Assistant integration: split WebSocket connection with pending-map
+
+**Decision:** The Home Assistant integration connects via `tokio-tungstenite` at startup, performs the HA auth handshake (`auth_required` → `auth` → `auth_ok`), then splits the connection into a `SplitSink` (stored in `HaClient`) and a `SplitStream` (driven by a background task). Event subscriptions are stubbed now; the infrastructure supports them from the start. Response matching uses a pending-map: `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` keyed by the HA message ID. `HaClient` is stored in `AppState` as `Arc<HaClient>`.
+
+**Reasoning:** A mutex-over-full-connection would serialize all HA calls and make event subscriptions impossible. Splitting from the start avoids a non-trivial refactor later. The pending-map allows multiple concurrent in-flight commands without serializing the sink. `AtomicU32` for the message ID counter is lock-free and correct for concurrent increments.
+
+---
+
 ## 2026-06-13 — Axum with shared `AppState` for tool registry
 
 **Decision:** Tools are registered at startup into `AppState`, which is cloned into every request via Axum's `State` extractor.

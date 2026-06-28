@@ -35,8 +35,8 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init, `tracing_subscriber` logging init |
-| `src/backend/state.rs` | `AppState` (read-only fields shared via `Arc`) — `Arc<Vec<Tool>>`, `Arc<str>` system prompt, Ollama URL + model, reqwest client (shared across all integrations), `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>` (qwen3-tts), `Arc<VoiceFile>` speaker, `Arc<Mutex<String>>` Spotify access token, `Arc<Mutex<HashMap<String,String>>>` Spotify devices cache (`name → id`) |
-| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; parses `astra.conf` once into a map (`OLLAMA_ENDPOINT`, `OLLAMA_MODEL`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_QUANT`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`) |
+| `src/backend/state.rs` | `AppState` (read-only fields shared via `Arc`) — `Arc<Vec<Tool>>`, `Arc<str>` system prompt, Ollama URL + model, reqwest client (shared across all integrations), `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>` (qwen3-tts), `Arc<VoiceFile>` speaker, `Arc<Mutex<String>>` Spotify access token, `Arc<Mutex<HashMap<String,String>>>` Spotify devices cache (`name → id`), `Option<Arc<HaClient>>` Home Assistant client (None if HA unreachable at startup) |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; parses `astra.conf` once into a map. Core keys: `OLLAMA_ENDPOINT`, `OLLAMA_MODEL`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_QUANT`. Integration-specific keys live in each integration's own `config.rs`. |
 | `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
 | `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
 | `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
@@ -53,6 +53,10 @@ WebSocket client
 | `src/integrations/web/ddg_search.rs` | DuckDuckGo search (stub) |
 | `src/integrations/spotify.rs` | Spotify sub-module root |
 | `src/integrations/spotify/spotify_connection.rs` | Spotify API — `refresh_access_token`, `get_devices`, `play`, `pause`, `resume`, `search`; pure functions, no `AppState` dependency |
+| `src/integrations/home.rs` | Home integrations sub-module root |
+| `src/integrations/home/ha.rs` | HA sub-module root |
+| `src/integrations/home/ha/home_assistant.rs` | `HaClient` struct — `Arc<Mutex<SplitSink>>` sink, `AtomicU32` message ID counter, `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` pending map; `connect()` does the HA auth handshake and spawns the background `event_loop`; event_loop routes response frames to waiting callers via the pending map |
+| `src/integrations/home/ha/config.rs` | HA config getters — `ha_url()`, `ha_token()` (keys: `HOME_ASSISTANT_ENDPOINT`, `HOME_ASSISTANT_TOKEN`) |
 
 ## Conversation State
 

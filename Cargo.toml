@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.8.9", features = ["ws"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+tungstenite = "0.26"
 futures = "0.3.32"
 reqwest = { version = "0.13.3", features = ["json", "stream", "form", "query"] }
 serde = { version = "1.0.228", features = ["derive"] }

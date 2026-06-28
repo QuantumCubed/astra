@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use qwen3_tts::{TtsEngine, VoiceFile};
 use whisper_rs::WhisperContext;
-
+use crate::integrations::home::ha::home_assistant::HaClient;
 use crate::{backend::audio::{
     stt::load_whisper_ctx,
     tts::{load_tts_model, load_tts_voice_file},
@@ -30,6 +30,7 @@ pub struct AppState {
     // Speaker profile, loaded once at startup and shared read-only.
     pub tts_voice: Arc<VoiceFile>,
     pub spotify_devices: Arc<tokio::sync::Mutex<HashMap<String, String>>>,
+    pub ha_client: Option<Arc<HaClient>>
 }
 
 impl AppState {
@@ -88,6 +89,13 @@ impl AppState {
             client,
             spotify_token: Arc::new(tokio::sync::Mutex::new(spotify_token)),
             spotify_devices: Arc::new(tokio::sync::Mutex::new(spotify_devices)),
+            ha_client: match HaClient::connect().await {
+                Ok(client) => Some(Arc::new(client)),
+                Err(e) => {
+                    tracing::warn!("Home Assistant unavailable at startup: {e}");
+                    None
+                }
+            },
         }
     }
 }

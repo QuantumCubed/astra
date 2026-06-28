@@ -9,6 +9,19 @@ updated: 2026-06-28
 
 ---
 
+## 2026-06-28 — Home Assistant WebSocket integration: connection infrastructure
+
+- Added `tokio-tungstenite` + `tungstenite` to `Cargo.toml` for WebSocket client support.
+- Created module structure: `integrations/home.rs` → `home/ha.rs` → `home/ha/home_assistant.rs` + `home/ha/config.rs`. Directory uses single-word `ha/` (not `home-assistant/`) to avoid the `-` identifier restriction.
+- Defined `HaClient` struct: `Arc<Mutex<SplitSink>>` sink, `AtomicU32` message ID counter, `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` pending map.
+- Implemented `HaClient::connect()`: loads `HOME_ASSISTANT_ENDPOINT` + `HOME_ASSISTANT_TOKEN` from local `ha/config.rs` (not `AppState`), connects via `connect_async`, performs the `auth_required → auth → auth_ok` handshake, splits the stream, spawns background `event_loop`, returns `Self`.
+- `event_loop` receives frames on the `SplitStream`; routes frames with an `id` to the waiting `oneshot::Sender` in the pending map; logs events without an `id` (stub for subscriptions).
+- Added `ha_client: Option<Arc<HaClient>>` to `AppState` — `None` with a `WARN` log if HA is unreachable at startup, so the server starts gracefully regardless.
+- Established modular integrations pattern: each integration owns its config loading (`ha/config.rs` calls shared `load_conf()`, extracts its own keys) and its own state struct — `AppState` stores only `Arc<IntegrationStruct>`.
+- **Verified:** server connects to Home Assistant on startup and logs `INFO connected to Home Assistant`.
+
+---
+
 ## 2026-06-28 — Spotify playback tools: play, pause, resume, search
 
 - Implemented `play`, `pause`, `resume` in `spotify_connection.rs` — all take `device_id: Option<&str>` and conditionally attach the query param; `play` routes `spotify:track:` URIs to `uris[]` and all others to `context_uri` via `.starts_with()`.

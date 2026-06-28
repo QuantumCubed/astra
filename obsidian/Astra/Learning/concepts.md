@@ -3,6 +3,33 @@ created: 2026-06-13
 updated: 2026-06-28
 ---
 
+## Composition Over Inheritance — Rust Has No `extends`
+**Date:** 2026-06-28
+**Context:** Building `HaClient` to wrap a WebSocket connection with HA-specific protocol logic
+**Source:** Claude
+
+Rust has no inheritance. You cannot "extend" a type to add fields or override methods. Instead, Rust uses composition: you define a struct that *owns* the things it needs as fields, and put all the behaviour in an `impl` block. If you want a contract that multiple types can satisfy, that's a `trait` — the equivalent of an interface, not a base class. For `HaClient`, this means the struct owns the sink, message ID counter, and pending map as fields, and `impl HaClient` holds all the methods (`connect`, `call_service`, etc.). Nothing is inherited; everything is explicitly owned or borrowed.
+
+---
+
+## Double `??` for Unwrapping `Option<Result<T, E>>`
+**Date:** 2026-06-28
+**Context:** Receiving the first WebSocket frame from Home Assistant in `HaClient::connect()`
+**Source:** Claude
+
+`stream.next().await` returns `Option<Result<T, E>>` — `None` if the stream closed, `Ok(T)` if a frame arrived, `Err(E)` if it was malformed. To turn this into a plain `T` (or bail on failure), you use `.ok_or_else(|| anyhow!("..."))?` to convert the `Option` to `Result`, which gives you `Result<Result<T, E>, anyhow::Error>`. The first `?` unwraps the outer `Result`, leaving `Result<T, E>`. The second `?` unwraps the inner one, leaving `T`. Written inline: `stream.next().await.ok_or_else(|| anyhow!("closed"))??`. Each `?` peels off one layer.
+
+---
+
+## Pending-Map Pattern for Async Request-Response Matching
+**Date:** 2026-06-28
+**Context:** Designing `HaClient` to support multiple concurrent in-flight HA commands over one WebSocket
+**Source:** Claude
+
+When you have a single shared connection and want to send multiple requests concurrently without serializing them, you use a pending map: a `HashMap<id, oneshot::Sender<Response>>` shared between the sender and a background receiver task. The sender increments an atomic counter to get a unique ID, inserts a `oneshot::Sender` into the map under that ID, sends the request with the ID embedded, then awaits the `oneshot::Receiver`. The background task loops receiving frames; when it gets a response with an ID, it looks up the matching sender in the map, removes it, and sends the response through the oneshot. This pattern allows many in-flight requests to coexist — each waits independently on its own oneshot channel rather than blocking the shared connection.
+
+---
+
 ## `if let` for Single-Branch Pattern Matching on `Option`
 **Date:** 2026-06-28
 **Context:** Conditionally attaching a `device_id` query param to a Spotify API request only when present

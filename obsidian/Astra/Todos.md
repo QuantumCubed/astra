@@ -9,6 +9,9 @@ updated: 2026-06-28
 
 ## In Progress
 
+- [ ] Home Assistant: implement `get_states` and `call_service` command methods on `HaClient`
+- [ ] Home Assistant: wire HA tools into `registry.rs` / `dispatch.rs` / `implementations.rs`
+- [ ] Home Assistant: implement event subscriptions (replace stub in `event_loop`)
 - [ ] Full mic → STT → LLM → TTS round-trip test with the web client (blocked: mic capture needs a secure context — see Backlog)
 
 ## Backlog
@@ -27,12 +30,13 @@ updated: 2026-06-28
 - [ ] Structured tool error handling (tool failures must not crash the request)
 - [ ] Spotify: implement 401 → refresh token → retry path in play/pause/search implementations
 - [ ] Spotify: bootstrapping HTTP endpoint to automate OAuth flow and write tokens to `astra.conf`
-- [ ] Spotify: modularize into `SpotifyCtx` in `AppState` once a second integration is added
+- [ ] Spotify: refactor into `SpotifyCtx` struct — move `spotify_token`, `spotify_devices` out of raw `AppState` fields; add `integrations/spotify/config.rs`
 - [ ] Spotify: implement `spotify_swap_playback(from_device, to_device)` — seamlessly transfer active playback from one device to another
 - [ ] Spotify: implement `spotify_queue(uri)` — add a track to the current play queue
 
 ## Done
 
+- [x] Home Assistant: `HaClient` struct, `connect()` auth handshake, split WebSocket, background `event_loop` (stub), pending-map for response matching; `Option<Arc<HaClient>>` in `AppState`; graceful startup on HA unavailable
 - [x] Spotify: `spotify_search(query)` tool — searches tracks, albums, playlists; returns `Vec<(name, uri)>` as JSON for the model to choose from; null items handled via `Vec<Option<T>>` + `.flatten()`
 - [x] Spotify: `spotify_play_content(uri, device_name?)` tool — plays a URI on a named or active device; routes `spotify:track:` to `uris[]`, others to `context_uri`; falls back to active device if name not in cache
 - [x] Spotify: `spotify_pause_content` tool — pauses on active device
