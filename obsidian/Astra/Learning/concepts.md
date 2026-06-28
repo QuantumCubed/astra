@@ -1,6 +1,60 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-06-28
+---
+
+## `if let` for Single-Branch Pattern Matching on `Option`
+**Date:** 2026-06-28
+**Context:** Conditionally attaching a `device_id` query param to a Spotify API request only when present
+**Source:** Claude
+
+`if let Some(id) = device_id` is a concise way to match one variant of an enum and bind its inner value at the same time. If `device_id` is `Some`, the block runs with `id` bound to the inner value; if it's `None`, the block is skipped entirely. It is equivalent to a `match` with one arm you care about, but shorter when you only need one branch. The bound variable (`id`) can be any name — it doesn't have to match the original variable, which matters when the types differ (`Option<String>` → `String`) or when you want to shadow with the same name.
+
+---
+
+## `String` vs `&str` in Structs — Ownership and Lifetimes
+**Date:** 2026-06-28
+**Context:** Building `SpotifyPlayRequest` and `SpotifySearchItem` structs for Spotify API calls
+**Source:** Claude
+
+`&str` is a borrowed reference — it doesn't own its data and requires an explicit lifetime annotation on any struct that holds it (`struct Foo<'a> { field: &'a str }`). That lifetime then propagates to every function that constructs or uses the struct. `String` owns its data, making the struct self-contained with no lifetime parameter. For short-lived request body structs that are constructed, serialized, and dropped in one function, `String` is the right choice — the ownership overhead is negligible and the code stays simple.
+
+---
+
+## `Vec<Option<T>>` + `.flatten()` for Nullable JSON Arrays
+**Date:** 2026-06-28
+**Context:** Deserializing Spotify's search response, whose `items` arrays can contain null entries
+**Source:** Claude
+
+When a JSON array can contain `null` entries alongside real objects, `Vec<T>` will fail to deserialize because serde can't map `null` to a struct. Changing the element type to `Option<T>` tells serde that each element is either a valid item (`Some`) or null (`None`). After deserialization, `.into_iter().flatten()` skips all `None` entries and unwraps the `Some` values, giving a clean iterator of `T`. This is the idiomatic pattern for "nullable array elements" in serde — no manual filtering needed.
+
+---
+
+## `.to_string()` vs `.clone()` for Type Conversion
+**Date:** 2026-06-28
+**Context:** Converting `&str` URI values into owned `String` fields in `SpotifyPlayRequest`
+**Source:** Claude
+
+`.clone()` copies a value into a new instance of the *same type* — it's for `String → String`. `.to_string()` converts a value *into* a `String` from a different type — it's for `&str → String`. Both compile when the source is `&str` (because `&str` also implements `Clone` via a round-trip), but `.to_string()` expresses the intent clearly: you're converting, not copying. Use `.clone()` when the source is already a `String`; use `.to_string()` when the source is `&str`.
+
+---
+
+## `into_iter()` Transfers Ownership vs `iter()` Which Borrows
+**Date:** 2026-06-27
+**Context:** Building a `HashMap` from a `Vec<SpotifyDevice>` in `get_devices` in `spotify_connection.rs`
+**Source:** Self-discovered
+
+`iter()` gives you references to each element (`&T`) — the original collection keeps ownership. `into_iter()` consumes the collection and gives you owned values (`T`), transferring ownership into the iterator. When you need to move fields out of each element (like `String` fields you want to put into a new collection), `into_iter()` is the right choice — with `iter()` you'd have to clone those strings since you only have a reference. In the closure, `|sd|` receives an owned value with `into_iter()`, whereas `|&sd|` or `|sd|` with `iter()` receives a reference.
+
+---
+
+## `.collect()` Infers the Target Collection from the Return Type
+**Date:** 2026-06-27
+**Context:** Collecting an iterator of `(String, String)` tuples into a `HashMap` in `get_devices`
+**Source:** Self-discovered
+
+`.collect()` is a generic method that can produce many different collection types — `Vec`, `HashMap`, `HashSet`, and others. It figures out which one to build by looking at the expected type from context, most often the function's return type. If the function returns `Result<HashMap<String, String>, E>`, the compiler sees that `Ok(...)` must contain a `HashMap<String, String>` and tells `.collect()` to build that. You rarely need to annotate the type explicitly — the return signature does the work.
+
 ---
 
 # Concepts

@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-06-28
 ---
 
 # Roadmap
@@ -99,9 +99,20 @@ Error codes are deferred — defined when the full set of error cases is known.
 
 - [ ] Design the tool interface properly — each tool should be its own module, not a single `implementations.rs`
 - [ ] Decide how tools are registered — static list vs. dynamic loading
-- [ ] Implement first real tool (TBD — candidate: file read, web search, home automation command)
 - [ ] Structured tool error handling — tool failures should not crash the request
 - [ ] Tool result streaming — long-running tools should stream progress
+
+### Spotify Integration (in progress)
+
+- [x] `spotify_get_devices` — returns active device names from cache
+- [x] `spotify_search(query)` — returns `(name, uri)` list for model to choose from
+- [x] `spotify_play_content(uri, device_name?)` — plays a URI on named or active device
+- [x] `spotify_pause_content` — pauses on active device
+- [x] `spotify_resume_content` — resumes on active device
+- [ ] `spotify_swap_playback(from, to)` — transfer playback between devices
+- [ ] `spotify_queue(uri)` — add a track to the play queue
+- [ ] 401 → refresh token → retry path
+- [ ] Bootstrapping endpoint to automate OAuth and write tokens to `astra.conf`
 
 ---
 

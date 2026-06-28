@@ -39,7 +39,54 @@ pub fn register_tools() -> Vec<Tool> {
         Tool::new(
             "list_contents",
             "lists the contents of the pwd",
-            no_args,
+            no_args.clone(),
+        ),
+        Tool::new(
+            "spotify_get_devices",
+            "gets active spotify client devices",
+            no_args.clone(),
+        ),
+        Tool::new(
+            "spotify_search",
+            "searches Spotify for tracks, albums, and playlists — returns a list of (name, uri) results; call spotify_play_content with the chosen uri",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "the search term e.g. artist name, track name, album name"
+                    }
+                },
+                "required": ["query"]
+            }),
+        ),
+        Tool::new(
+            "spotify_play_content",
+            "plays spotify content by uri on target or active client",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "uri": {
+                        "type": "string",
+                        "description": "the spotify uri of the content to play e.g. spotify:track:..."
+                    },
+                    "device_name": {
+                        "type": "string",
+                        "description": "the name of the device to play on — omit to use the active device"
+                    }
+                },
+                "required": ["uri"]
+            }),
+        ),
+        Tool::new(
+            "spotify_pause_content",
+            "pauses spotify on active client",
+            no_args.clone(),
+        ),
+        Tool::new(
+            "spotify_resume_content",
+            "resumes spotify on active client",
+            no_args.clone(),
         ),
     ]
 }

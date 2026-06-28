@@ -379,7 +379,7 @@ async fn run_agent_loop(
         for tool_call in &tool_calls {
             let name = tool_call["function"]["name"].as_str().unwrap_or_default();
             let args = tool_call["function"]["arguments"].clone();
-            let result = dispatch::dispatch_tool(name, args).await;
+            let result = dispatch::dispatch_tool(name, args, state).await;
             let result_str =
                 serde_json::to_string(&result).unwrap_or_else(|_| "error".to_string());
             conversation.add_tool_result(&result_str);

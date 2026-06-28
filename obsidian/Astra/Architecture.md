@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-06-28
 ---
 
 # Architecture
@@ -35,8 +35,8 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init, `tracing_subscriber` logging init |
-| `src/backend/state.rs` | `AppState` (read-only fields shared via `Arc`) — `Arc<Vec<Tool>>`, `Arc<str>` system prompt, Ollama URL + model, reqwest client, `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>` (qwen3-tts), `Arc<VoiceFile>` speaker |
-| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; parses `astra.conf` once into a map (`OLLAMA_ENDPOINT`, `OLLAMA_MODEL`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_QUANT`) |
+| `src/backend/state.rs` | `AppState` (read-only fields shared via `Arc`) — `Arc<Vec<Tool>>`, `Arc<str>` system prompt, Ollama URL + model, reqwest client (shared across all integrations), `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>` (qwen3-tts), `Arc<VoiceFile>` speaker, `Arc<Mutex<String>>` Spotify access token, `Arc<Mutex<HashMap<String,String>>>` Spotify devices cache (`name → id`) |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; parses `astra.conf` once into a map (`OLLAMA_ENDPOINT`, `OLLAMA_MODEL`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_QUANT`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`) |
 | `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
 | `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
 | `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
@@ -46,8 +46,13 @@ WebSocket client
 | `src/backend/audio/tts.rs` | TTS — `load_tts_model` + `synthesize_sentence_streaming` (qwen3-tts `TtsEngine`, `spawn_blocking`, streams PCM chunks via a `tokio::mpsc` channel); `strip_markdown` + `take_sentences` pre-process LLM output |
 | `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop, audio buffer, full voice pipeline |
 | `src/tools/registry.rs` | `Tool`/`ToolFunction` structs, `register_tools()` |
-| `src/tools/dispatch.rs` | Routes tool call by name to implementation |
-| `src/tools/implementations.rs` | Async tool logic (`tokio::process::Command`) |
+| `src/tools/dispatch.rs` | Routes tool call by name to implementation; accepts `&AppState` for integration access |
+| `src/tools/implementations.rs` | Async tool logic (`tokio::process::Command` for shell tools; reads `AppState` fields for integration tools) |
+| `src/integrations.rs` | Integrations module root |
+| `src/integrations/web.rs` | Web integrations sub-module root |
+| `src/integrations/web/ddg_search.rs` | DuckDuckGo search (stub) |
+| `src/integrations/spotify.rs` | Spotify sub-module root |
+| `src/integrations/spotify/spotify_connection.rs` | Spotify API — `refresh_access_token`, `get_devices`, `play`, `pause`, `resume`, `search`; pure functions, no `AppState` dependency |
 
 ## Conversation State
 
@@ -125,3 +130,8 @@ binary WS frames (PCM chunks)
 |---|---|
 | `echo_hello_world` | Echoes "Hello, World!" via shell command |
 | `list_contents` | Lists working directory contents |
+| `spotify_get_devices` | Returns cached list of active Spotify device names |
+| `spotify_search` | Searches Spotify for tracks, albums, playlists — returns `(name, uri)` list for model to choose from |
+| `spotify_play_content` | Plays a Spotify URI on a named or active device |
+| `spotify_pause_content` | Pauses playback on the active device |
+| `spotify_resume_content` | Resumes playback on the active device |

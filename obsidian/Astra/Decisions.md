@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-06-28
 ---
 
 # Decisions
@@ -291,6 +291,78 @@ A log of significant technical and architectural decisions, including the reason
 **Reasoning:** At RTF < 1 the audio keeps up once it starts, but whole-sentence synthesis still cost multiple seconds of time-to-first-audio on long sentences; per-chunk streaming drops that to a few hundred ms. The transcript can't be synced client-side (the PCM stream has no sentence boundaries), so the server marks each sentence; revealing on the Web Audio clock — not on receipt — keeps text aligned to speech even as the synthesis buffer runs ahead of playback. The old client buffered every frame and played one blob at `tts_end`; that path is removed.
 
 **Consequences:** `tts_start`/`tts_sentence` are now required by the web client (it waits for `tts_start` to learn the sample rate), so server + client must be deployed together. The displayed transcript is the spoken (stripped) text, not full markdown. Per-word sync would need finer markers; per-sentence is the current granularity.
+
+---
+
+## 2026-06-28 — Spotify integration: credentials in astra.conf, manual OAuth for dev
+
+**Decision:** Spotify credentials (`SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`) are stored in `.astra/astra.conf`. The initial refresh token is obtained manually via a one-time browser OAuth flow and pasted into the conf file. A future bootstrapping HTTP endpoint will automate this.
+
+**Reasoning:** Keeps credentials alongside other runtime config and out of the codebase. The manual flow is a dev-phase shortcut — the refresh token is long-lived (~6 months) so it only needs to be set once per rotation. The bootstrapping endpoint is deferred until the OAuth callback wiring is worth the complexity.
+
+---
+
+## 2026-06-28 — Single shared `reqwest::Client` for all integrations
+
+**Decision:** The single `reqwest::Client` in `AppState` is shared across all HTTP integrations (Ollama, Spotify, and future integrations). It is created as a local variable before `Self { }` in `AppState::new()` and moved into the struct.
+
+**Reasoning:** `reqwest::Client` manages an internal connection pool. Multiple clients waste resources and lose the benefit of connection reuse. A single client is the idiomatic pattern; each integration receives `&state.client` at the call site.
+
+---
+
+## 2026-06-28 — Integration functions receive specific values, not `AppState`
+
+**Decision:** Functions in `src/integrations/` take the specific values they need (`client: &reqwest::Client`, `token: &str`, etc.) as arguments rather than accepting `&AppState`. Only `dispatch.rs` and `implementations.rs` know about `AppState` and extract the relevant fields before calling down.
+
+**Reasoning:** Keeps integration code decoupled from Axum and independently testable. The arg threading is minimal (two levels: dispatch → implementation → integration); the architectural benefit outweighs the verbosity.
+
+---
+
+## 2026-06-28 — `dispatch_tool` accepts `&AppState`
+
+**Decision:** `dispatch_tool` signature changed from `(tool_name, args)` to `(tool_name, args, state: &AppState)`. The call site in `ws.rs` passes `&state`.
+
+**Reasoning:** Integration tools need access to `AppState` fields (token, devices cache, client). Passing the whole state to dispatch is the natural boundary — dispatch extracts what each implementation needs rather than threading `AppState` through every implementation signature.
+
+---
+
+## 2026-06-28 — Lazy Spotify device resolution with startup cache
+
+**Decision:** `get_devices` is called once at startup to populate `state.spotify_devices` (a `Mutex<HashMap<name → id>>`). If startup fails (Spotify not open), the map starts empty and is refreshed on the first tool call error. No device IDs are persisted across restarts.
+
+**Reasoning:** Spotify device IDs are only valid while the app is running on that device. Storing them across restarts is meaningless. A startup call gives the model immediate device info for the first command; the refresh-on-error fallback handles stale IDs without complicating startup.
+
+---
+
+## 2026-06-28 — Spotify device nicknames deferred to persistent storage phase
+
+**Decision:** User-defined device nicknames ("my pc" → "AK-DESKTOP") are deferred until Astra has persistent storage (DB / RAG). No config-file nickname mapping will be built in the interim.
+
+**Reasoning:** A config-file hack would be thrown away once persistent storage is introduced. The current device name returned by Spotify's API is descriptive enough for the model to work with.
+
+---
+
+## 2026-06-28 — Two-step search pattern: model picks URI before calling play
+
+**Decision:** Spotify playback is split into two tools: `spotify_search(query)` returns a `(name, uri)` list for the model to reason over, and `spotify_play_content(uri)` takes a URI the model already chose. The model handles content selection between the two calls.
+
+**Reasoning:** Embedding search inside `play` would force the implementation to pick a result without model judgment. Returning results to the model lets it match user intent (e.g. preferring a playlist over a track, or a specific album). Keeps each tool single-purpose.
+
+---
+
+## 2026-06-28 — `play` and `resume` are separate tools
+
+**Decision:** `spotify_play_content` (sends a JSON body with a URI) and `spotify_resume_content` (no body, resumes current playback) are registered as distinct tools.
+
+**Reasoning:** They have different parameter shapes — the model shouldn't have to decide which mode to use via an optional field. Separate tools with distinct descriptions make the intent unambiguous and reduce model error.
+
+---
+
+## 2026-06-28 — Spotify device fallback to active client on cache miss
+
+**Decision:** If a requested device name is not found in `state.spotify_devices`, `device_id` is passed as `None` and Spotify falls back to the most recently active client. No error is returned.
+
+**Reasoning:** 99% of pause/resume/play calls target the active device anyway. A cache miss on an unrecognized name is better handled by Spotify's own fallback than by erroring out — the playback usually ends up on the right device.
 
 ---
 

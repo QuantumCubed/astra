@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-06-28
 ---
 
 # Todos
@@ -25,9 +25,25 @@ updated: 2026-06-25
 
 - [ ] Refactor tool implementations into per-tool modules
 - [ ] Structured tool error handling (tool failures must not crash the request)
-- [ ] Define and implement first real tool
+- [ ] Spotify: implement 401 → refresh token → retry path in play/pause/search implementations
+- [ ] Spotify: bootstrapping HTTP endpoint to automate OAuth flow and write tokens to `astra.conf`
+- [ ] Spotify: modularize into `SpotifyCtx` in `AppState` once a second integration is added
+- [ ] Spotify: implement `spotify_swap_playback(from_device, to_device)` — seamlessly transfer active playback from one device to another
+- [ ] Spotify: implement `spotify_queue(uri)` — add a track to the current play queue
 
 ## Done
+
+- [x] Spotify: `spotify_search(query)` tool — searches tracks, albums, playlists; returns `Vec<(name, uri)>` as JSON for the model to choose from; null items handled via `Vec<Option<T>>` + `.flatten()`
+- [x] Spotify: `spotify_play_content(uri, device_name?)` tool — plays a URI on a named or active device; routes `spotify:track:` to `uris[]`, others to `context_uri`; falls back to active device if name not in cache
+- [x] Spotify: `spotify_pause_content` tool — pauses on active device
+- [x] Spotify: `spotify_resume_content` tool — resumes on active device
+- [x] reqwest `"query"` feature added to `Cargo.toml` (`.query()` is not in core in 0.13)
+- [x] Spotify: `spotify_get_devices` tool — reads cached `state.spotify_devices`, returns device names as JSON; `dispatch_tool` updated to accept `&AppState`
+- [x] Spotify: `integrations/spotify/spotify_connection.rs` — `refresh_access_token` (form POST, Basic auth) and `get_devices` (Bearer auth, returns `HashMap<name, id>`)
+- [x] Spotify: `AppState` extended with `spotify_token: Arc<Mutex<String>>` and `spotify_devices: Arc<Mutex<HashMap<String,String>>>`; access token minted at startup
+- [x] Spotify: credentials (`SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`) added to `astra.conf` and reader functions added to `config.rs`
+- [x] `reqwest` `form` feature added to `Cargo.toml`
+- [x] Single shared `reqwest::Client` for all integrations — moved from inline `Self {}` to pre-constructed local in `AppState::new()`
 
 - [x] Sub-sentence TTS streaming — `synthesize_sentence_streaming` forwards PCM chunks (~320 ms) via a `tokio::mpsc` channel as the decoder emits them; web client plays them gapless via a Web Audio scheduling cursor (replaces buffer-then-play)
 - [x] Transcript synced to audio — new `tts_sentence` protocol marker; web client reveals each sentence's text on the Web Audio clock as it's spoken
