@@ -2,6 +2,8 @@ use tokio::process::Command;
 use std::collections::HashMap;
 
 use crate::integrations::spotify::spotify_connection::{play, pause, resume, search};
+use crate::integrations::home::ha::home_assistant::HaClient;
+use crate::integrations::home::ha::types::HaDevice;
 
 pub async fn echo_hello_world() -> Result<String, std::io::Error> {
     #[cfg(target_os = "windows")]
@@ -70,6 +72,18 @@ pub async fn spotify_resume_content(client: &reqwest::Client, token: &str) -> Re
     resume(client, token, None).await?;
 
     Ok(())
+}
+
+pub async fn ha_get_devices(ha: &HaClient) -> anyhow::Result<Vec<HaDevice>> {
+    ha.get_devices().await
+}
+
+pub async fn ha_toggle_device(ha: &HaClient, entity_id: &str) -> anyhow::Result<()> {
+    ha.call_service("homeassistant", "toggle", entity_id).await
+}
+
+pub async fn ha_reconnect(ha: &HaClient) -> anyhow::Result<()> {
+    ha.reconnect().await
 }
 
 // pub async fn web_search

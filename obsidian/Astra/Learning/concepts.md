@@ -1,6 +1,24 @@
 ---
 created: 2026-06-13
-updated: 2026-06-28
+updated: 2026-07-01
+---
+
+## `tokio::join!` for Concurrent Async Calls
+**Date:** 2026-07-01
+**Context:** Firing `get_states`, `get_entity_registry`, and `get_area_registry` in parallel inside `HaClient::get_devices()`
+**Source:** Claude
+
+`tokio::join!(a(), b(), c())` starts all three futures at the same time and waits for all of them to finish, returning their results as a tuple. This is distinct from sequential `.await` calls, where each future must complete before the next starts. Use it when the calls are independent — no result is needed as input to another. Each variable in the destructured tuple holds the `Result` from its corresponding future; you then unwrap each with `?` as normal. Concurrency here is within a single task (not separate threads) — `join!` interleaves polling rather than parallelising on multiple CPUs.
+
+---
+
+## `?` Inside a `filter_map` Closure as a Short-Circuit to `None`
+**Date:** 2026-07-01
+**Context:** Building `Vec<HaDevice>` from a `serde_json::Value` array inside `get_devices()`
+**Source:** Claude
+
+Inside a closure that returns `Option<T>`, the `?` operator short-circuits to `None` rather than propagating an error up the call stack. This makes it possible to write multi-step extraction logic concisely: `let id = entry["entity_id"].as_str()?` — if the field is missing or not a string, `as_str()` returns `None`, and `?` immediately returns `None` from the closure. Since `filter_map` discards `None` results automatically, any entry where a required field is absent is silently skipped without needing an explicit `if let` or `match`. This is the idiomatic pattern for "extract multiple required fields from loosely-typed data and skip malformed entries."
+
 ---
 
 ## Composition Over Inheritance — Rust Has No `extends`

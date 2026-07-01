@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-28
+updated: 2026-07-01
 ---
 
 # Architecture
@@ -55,7 +55,8 @@ WebSocket client
 | `src/integrations/spotify/spotify_connection.rs` | Spotify API — `refresh_access_token`, `get_devices`, `play`, `pause`, `resume`, `search`; pure functions, no `AppState` dependency |
 | `src/integrations/home.rs` | Home integrations sub-module root |
 | `src/integrations/home/ha.rs` | HA sub-module root |
-| `src/integrations/home/ha/home_assistant.rs` | `HaClient` struct — `Arc<Mutex<SplitSink>>` sink, `AtomicU32` message ID counter, `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` pending map; `connect()` does the HA auth handshake and spawns the background `event_loop`; event_loop routes response frames to waiting callers via the pending map |
+| `src/integrations/home/ha/home_assistant.rs` | `HaClient` struct — `Arc<Mutex<SplitSink>>` sink, `AtomicU32` message ID counter, `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` pending map; `connect()` + `establish()` (shared auth handshake) + `reconnect()` (swaps sink, resets counter + pending, spawns new event_loop); private `send_command(payload)` abstracts all HA WS plumbing; public methods: `get_states`, `get_entity_registry`, `get_area_registry`, `get_devices`, `call_service` |
+| `src/integrations/home/ha/types.rs` | `HaDevice` struct — `entity_id`, `friendly_name`, `aliases: Vec<String>`, `area: Option<String>`, `state`; derives `Serialize` + `Debug` |
 | `src/integrations/home/ha/config.rs` | HA config getters — `ha_url()`, `ha_token()` (keys: `HOME_ASSISTANT_ENDPOINT`, `HOME_ASSISTANT_TOKEN`) |
 
 ## Conversation State
@@ -139,3 +140,6 @@ binary WS frames (PCM chunks)
 | `spotify_play_content` | Plays a Spotify URI on a named or active device |
 | `spotify_pause_content` | Pauses playback on the active device |
 | `spotify_resume_content` | Resumes playback on the active device |
+| `ha_get_devices` | Returns `Vec<HaDevice>` — three-way join of HA state + entity registry + area registry, filtered to `should_expose == true` entities |
+| `ha_toggle_device` | Calls `homeassistant.toggle` on a given `entity_id` |
+| `ha_reconnect` | Re-establishes the HA WebSocket connection without restarting the server |

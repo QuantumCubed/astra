@@ -70,6 +70,40 @@ pub async fn dispatch_tool(tool_name: &str, args: Value, state: &AppState) -> To
                 Err(e) => ToolResult::Error(e.to_string()),
             }
         }
+        "ha_get_devices" => {
+            match &state.ha_client {
+                Some(client) => {
+                    match implementations::ha_get_devices(client).await {
+                        Ok(devices) => ToolResult::Output(serde_json::to_string(&devices).unwrap_or_default()),
+                        Err(e) => ToolResult::Error(e.to_string()),
+                    }
+                }
+                None => ToolResult::Error("Home Assistant is not connected".to_string()),
+            }
+        }
+        "ha_toggle_device" => {
+            match &state.ha_client {
+                Some(client) => {
+                    let entity_id = args["entity_id"].as_str().unwrap_or("");
+                    match implementations::ha_toggle_device(client, entity_id).await {
+                        Ok(_) => ToolResult::Output("toggled".to_string()),
+                        Err(e) => ToolResult::Error(e.to_string()),
+                    }
+                }
+                None => ToolResult::Error("Home Assistant is not connected".to_string()),
+            }
+        }
+        "ha_reconnect" => {
+            match &state.ha_client {
+                Some(client) => {
+                    match implementations::ha_reconnect(client).await {
+                        Ok(_) => ToolResult::Output("reconnected to Home Assistant".to_string()),
+                        Err(e) => ToolResult::Error(e.to_string()),
+                    }
+                }
+                None => ToolResult::Error("Home Assistant client was never initialized".to_string()),
+            }
+        }
         _ => ToolResult::Error("unknown tool".to_string()),
     }
 }

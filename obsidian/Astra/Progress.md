@@ -1,11 +1,24 @@
 ---
 created: 2026-06-13
-updated: 2026-06-28
+updated: 2026-07-01
 ---
 
 # Progress
 
 [[ASTRA|← Home]]
+
+---
+
+## 2026-07-01 — Home Assistant: device query, toggle, and reconnect tools
+
+- Defined `HaDevice` struct in `ha/types.rs` (`entity_id`, `friendly_name`, `aliases: Vec<String>`, `area: Option<String>`, `state`) with `Serialize + Debug`.
+- Extracted auth handshake into private `establish()` helper; refactored `connect()` to use it; added `reconnect()` which swaps the sink, resets the message-ID counter, clears in-flight pending entries, and spawns a new `event_loop` — the old loop exits naturally when the dropped connection's stream closes.
+- Added private `send_command(payload: Value)` to `HaClient` — handles ID injection, pending-map insertion, sink lock, send, receive, and success check. All public methods are now one-liners.
+- Added `get_entity_registry` and `get_area_registry` methods.
+- Implemented `get_devices()`: fires all three calls concurrently via `tokio::join!`, builds `area_id → name` and `entity_id → state` lookup maps, filters entity registry to `disabled_by == null` + `should_expose == true`, constructs `Vec<HaDevice>`. Replaces raw `get_states` as the model's view of smart home state.
+- Implemented `call_service(domain, service, entity_id)` — one-liner over `send_command`.
+- Wired three tools end-to-end: `ha_get_devices`, `ha_toggle_device` (`homeassistant.toggle`), `ha_reconnect`.
+- **Root cause fix:** raw `get_states` was sending 50–200 KB of JSON to the model, causing 56 s first-token latency. `ha_get_devices` sends a small, filtered `Vec<HaDevice>` instead.
 
 ---
 

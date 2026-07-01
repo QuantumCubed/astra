@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-28
+updated: 2026-07-01
 ---
 
 # Todos
@@ -9,9 +9,6 @@ updated: 2026-06-28
 
 ## In Progress
 
-- [ ] Home Assistant: implement `get_states` and `call_service` command methods on `HaClient`
-- [ ] Home Assistant: wire HA tools into `registry.rs` / `dispatch.rs` / `implementations.rs`
-- [ ] Home Assistant: implement event subscriptions (replace stub in `event_loop`)
 - [ ] Full mic → STT → LLM → TTS round-trip test with the web client (blocked: mic capture needs a secure context — see Backlog)
 
 ## Backlog
@@ -23,6 +20,13 @@ updated: 2026-06-28
 - [ ] (Minor) Web client: guard the overlapping-response case where a new reply's `speakingId` can be cleared by the previous reply's last-chunk `onended`
 - [ ] Interruption handling — user speaks while the assistant is responding
 - [ ] (Deferred, only if needed) GPU ONNX decode — would need a crate fork to add a CUDA execution provider; unnecessary while RTF < 1
+
+### Home Assistant
+
+- [ ] Area-based device toggling — toggle all devices in a room by area name (e.g. "turn off the bonus room lights")
+- [ ] Implement event subscriptions in `event_loop` (currently stubs only)
+- [ ] `call_service` with `service_data` for services that require parameters (e.g. light brightness, colour)
+- [ ] Refactor Spotify into `SpotifyCtx` — move `spotify_token`, `spotify_devices` out of raw `AppState` fields; mirrors the `HaClient` modular pattern
 
 ### Phase 3 — Tool Layer
 
@@ -36,6 +40,13 @@ updated: 2026-06-28
 
 ## Done
 
+- [x] Home Assistant: `ha_get_devices`, `ha_toggle_device`, `ha_reconnect` tools wired end-to-end through `registry.rs`, `implementations.rs`, `dispatch.rs`
+- [x] Home Assistant: `HaClient::reconnect()` + `establish()` helper — reconnects the WebSocket without restarting the server; old `event_loop` dies naturally when the dropped connection closes
+- [x] Home Assistant: `call_service(domain, service, entity_id)` on `HaClient` via `send_command` abstraction
+- [x] Home Assistant: `get_devices()` — three-way join of `get_states` + `get_entity_registry` + `get_area_registry` via `tokio::join!`; filtered to `disabled_by == null` + `should_expose == true`; returns `Vec<HaDevice>`
+- [x] Home Assistant: `HaDevice` struct in `ha/types.rs` (`entity_id`, `friendly_name`, `aliases`, `area`, `state`)
+- [x] Home Assistant: `send_command` private method on `HaClient` — abstracts id injection, pending-map registration, sink lock, and success check; all public methods are now one-liners
+- [x] Home Assistant: `get_entity_registry` and `get_area_registry` methods on `HaClient`
 - [x] Home Assistant: `HaClient` struct, `connect()` auth handshake, split WebSocket, background `event_loop` (stub), pending-map for response matching; `Option<Arc<HaClient>>` in `AppState`; graceful startup on HA unavailable
 - [x] Spotify: `spotify_search(query)` tool — searches tracks, albums, playlists; returns `Vec<(name, uri)>` as JSON for the model to choose from; null items handled via `Vec<Option<T>>` + `.flatten()`
 - [x] Spotify: `spotify_play_content(uri, device_name?)` tool — plays a URI on a named or active device; routes `spotify:track:` to `uris[]`, others to `context_uri`; falls back to active device if name not in cache

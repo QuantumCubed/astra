@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-28
+updated: 2026-07-01
 ---
 
 # Decisions
@@ -381,6 +381,38 @@ A log of significant technical and architectural decisions, including the reason
 **Decision:** The Home Assistant integration connects via `tokio-tungstenite` at startup, performs the HA auth handshake (`auth_required` → `auth` → `auth_ok`), then splits the connection into a `SplitSink` (stored in `HaClient`) and a `SplitStream` (driven by a background task). Event subscriptions are stubbed now; the infrastructure supports them from the start. Response matching uses a pending-map: `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` keyed by the HA message ID. `HaClient` is stored in `AppState` as `Arc<HaClient>`.
 
 **Reasoning:** A mutex-over-full-connection would serialize all HA calls and make event subscriptions impossible. Splitting from the start avoids a non-trivial refactor later. The pending-map allows multiple concurrent in-flight commands without serializing the sink. `AtomicU32` for the message ID counter is lock-free and correct for concurrent increments.
+
+---
+
+## 2026-07-01 — HA reconnect logic lives inside `HaClient`, not `AppState`
+
+**Decision:** `HaClient::reconnect()` re-establishes the HA WebSocket connection by calling a private `establish()` helper (extracted from `connect()`), then replacing the internal sink, resetting the message ID counter, clearing in-flight pending entries, and spawning a new `event_loop`. `AppState.ha_client` remains `Option<Arc<HaClient>>` — no `Mutex` wrapper needed.
+
+**Reasoning:** The alternative — wrapping `ha_client` in `Mutex<Option<Arc<HaClient>>>` so it could be swapped at runtime — would require every HA dispatch arm to lock the mutex on every call. More importantly, each integration should own its own lifecycle; `AppState` is a thin registry, not a lifecycle manager. Keeping reconnect self-contained inside `HaClient` is consistent with the modular integrations pattern and doesn't bleed HA concerns into `AppState`. The old `event_loop` exits naturally when the dropped TCP connection's stream returns `None`, so no explicit cancellation signal is needed.
+
+---
+
+## 2026-07-01 — `HaDevice` custom type: join of three HA data sources, filtered by `should_expose`
+
+**Decision:** The model is given a custom `HaDevice` type (defined in `ha/types.rs`) instead of raw HA state. `get_devices()` on `HaClient` fires `get_states`, `get_entity_registry`, and `get_area_registry` concurrently via `tokio::join!`, then filters the entity registry to entities where `disabled_by == null` AND `options.conversation.should_expose == true`, and joins with state and area data to produce `Vec<HaDevice { entity_id, friendly_name, aliases, area, state }>`.
+
+**Reasoning:** Raw `get_states` returns 50–200 KB of JSON (all entities + all attributes), which caused 56 s first-token latency. HA's own `should_expose` field (set per-entity in the HA UI) is designed exactly for conversation assistants — it distinguishes user-controllable entities from diagnostic subcomponents without requiring Astra to reason about entity domains or categories. Joining with the area registry gives the model room context ("Bonus Room") which it otherwise lacks entirely.
+
+---
+
+## 2026-07-01 — `send_command` private method abstracts all HA WebSocket plumbing
+
+**Decision:** A private `send_command(&self, payload: Value) -> anyhow::Result<Value>` method on `HaClient` handles ID injection, pending-map registration, sink lock, send, await, and success check. All public methods (`get_states`, `get_entity_registry`, `get_area_registry`, `call_service`) are one-liners that build a payload and delegate to it.
+
+**Reasoning:** Every HA command follows identical plumbing — only the message type and extra fields vary. Without the abstraction, adding `get_entity_registry` and `get_area_registry` would have tripled the boilerplate. `send_command` takes a `Value` rather than a typed struct because HA commands have widely varying shapes; using `serde_json::json!` at the call site is already concise and does not benefit from an additional struct layer.
+
+---
+
+## 2026-07-01 — HA toggle via `homeassistant.toggle` service; separate on/off deferred
+
+**Decision:** The first HA control tool is `ha_toggle_device(entity_id)`, which calls `homeassistant.toggle` via `call_service`. Separate `ha_turn_on` / `ha_turn_off` tools are deferred.
+
+**Reasoning:** Toggle covers the common case with one tool and no ambiguity in tool selection. The only scenario where toggle falls short is "make sure the lights are on" (toggle could turn them off if already on), but that requires state awareness the model can get via `ha_get_devices` in a preceding call. Separate on/off can be added once the basic control flow is validated end-to-end.
 
 ---
 

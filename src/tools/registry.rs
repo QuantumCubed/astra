@@ -88,5 +88,29 @@ pub fn register_tools() -> Vec<Tool> {
             "resumes spotify on active client",
             no_args.clone(),
         ),
+        Tool::new(
+            "ha_get_devices",
+            "loads current device information",
+            no_args.clone()
+        ),
+        Tool::new(
+            "ha_reconnect",
+            "reconnects to Home Assistant if the connection was lost",
+            no_args.clone()
+        ),
+        Tool::new(
+            "ha_toggle_device",
+            "toggles a home assistant entity on or off",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "the entity_id to toggle e.g. switch.standup_lamp"
+                    }
+                },
+                "required": ["entity_id"]
+            }),
+        )
     ]
 }
