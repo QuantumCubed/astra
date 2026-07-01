@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-21
+updated: 2026-07-01
 ---
 
 # Astra
@@ -23,6 +23,6 @@ AI Personal Assistant — Rust/Axum WebSocket server that bridges clients to a l
 
 - [[REVIEWS]] — dated code review reports
 
-## Components
+## Integrations
 
-_None yet. Component folders will be added under `components/` as distinct subsystems are built._
+- [[INTEGRATIONS]] — per-integration notes (Discord, Spotify, Home Assistant, …)
