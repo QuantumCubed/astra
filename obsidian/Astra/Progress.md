@@ -1,11 +1,61 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-07-01
 ---
 
 # Progress
 
 [[ASTRA|← Home]]
+
+---
+
+## 2026-07-01 — Home Assistant: device query, toggle, and reconnect tools
+
+- Defined `HaDevice` struct in `ha/types.rs` (`entity_id`, `friendly_name`, `aliases: Vec<String>`, `area: Option<String>`, `state`) with `Serialize + Debug`.
+- Extracted auth handshake into private `establish()` helper; refactored `connect()` to use it; added `reconnect()` which swaps the sink, resets the message-ID counter, clears in-flight pending entries, and spawns a new `event_loop` — the old loop exits naturally when the dropped connection's stream closes.
+- Added private `send_command(payload: Value)` to `HaClient` — handles ID injection, pending-map insertion, sink lock, send, receive, and success check. All public methods are now one-liners.
+- Added `get_entity_registry` and `get_area_registry` methods.
+- Implemented `get_devices()`: fires all three calls concurrently via `tokio::join!`, builds `area_id → name` and `entity_id → state` lookup maps, filters entity registry to `disabled_by == null` + `should_expose == true`, constructs `Vec<HaDevice>`. Replaces raw `get_states` as the model's view of smart home state.
+- Implemented `call_service(domain, service, entity_id)` — one-liner over `send_command`.
+- Wired three tools end-to-end: `ha_get_devices`, `ha_toggle_device` (`homeassistant.toggle`), `ha_reconnect`.
+- **Root cause fix:** raw `get_states` was sending 50–200 KB of JSON to the model, causing 56 s first-token latency. `ha_get_devices` sends a small, filtered `Vec<HaDevice>` instead.
+
+---
+
+## 2026-06-28 — Home Assistant WebSocket integration: connection infrastructure
+
+- Added `tokio-tungstenite` + `tungstenite` to `Cargo.toml` for WebSocket client support.
+- Created module structure: `integrations/home.rs` → `home/ha.rs` → `home/ha/home_assistant.rs` + `home/ha/config.rs`. Directory uses single-word `ha/` (not `home-assistant/`) to avoid the `-` identifier restriction.
+- Defined `HaClient` struct: `Arc<Mutex<SplitSink>>` sink, `AtomicU32` message ID counter, `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` pending map.
+- Implemented `HaClient::connect()`: loads `HOME_ASSISTANT_ENDPOINT` + `HOME_ASSISTANT_TOKEN` from local `ha/config.rs` (not `AppState`), connects via `connect_async`, performs the `auth_required → auth → auth_ok` handshake, splits the stream, spawns background `event_loop`, returns `Self`.
+- `event_loop` receives frames on the `SplitStream`; routes frames with an `id` to the waiting `oneshot::Sender` in the pending map; logs events without an `id` (stub for subscriptions).
+- Added `ha_client: Option<Arc<HaClient>>` to `AppState` — `None` with a `WARN` log if HA is unreachable at startup, so the server starts gracefully regardless.
+- Established modular integrations pattern: each integration owns its config loading (`ha/config.rs` calls shared `load_conf()`, extracts its own keys) and its own state struct — `AppState` stores only `Arc<IntegrationStruct>`.
+- **Verified:** server connects to Home Assistant on startup and logs `INFO connected to Home Assistant`.
+
+---
+
+## 2026-06-28 — Spotify playback tools: play, pause, resume, search
+
+- Implemented `play`, `pause`, `resume` in `spotify_connection.rs` — all take `device_id: Option<&str>` and conditionally attach the query param; `play` routes `spotify:track:` URIs to `uris[]` and all others to `context_uri` via `.starts_with()`.
+- Implemented `spotify_search` in `spotify_connection.rs` — `GET /v1/search` with `type=track,album,playlist&limit=5`; returns `Vec<(name, uri)>`; null items handled via `Vec<Option<SpotifySearchItem>>` + `.into_iter().flatten()`.
+- Wired four new tools end-to-end: `spotify_search`, `spotify_play_content`, `spotify_pause_content`, `spotify_resume_content` — through `implementations.rs`, `dispatch.rs`, `registry.rs`. `spotify_play_content` looks up device name → ID from the devices cache and falls back to active device on miss.
+- Two-step search pattern: model calls `spotify_search` to get `(name, uri)` results, picks the best match, then calls `spotify_play_content` with the URI. Keeps each tool single-purpose.
+- Added `reqwest "query"` feature to `Cargo.toml` — `.query()` is not in reqwest 0.13's core.
+- Verified `spotify_pause_content` and `spotify_resume_content` working; `spotify_search` fixed after discovering Spotify returns null items in `items` arrays.
+
+---
+
+## 2026-06-28 — Spotify integration foundation: auth, devices cache, first tool
+
+- Set up Spotify OAuth manually (Authorization Code flow) — obtained refresh token via browser callback + Bruno POST; token stored in `.astra/astra.conf`.
+- Added `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN` to `astra.conf` and three reader functions to `backend/config.rs`.
+- Extended `AppState` with `spotify_token: Arc<Mutex<String>>` and `spotify_devices: Arc<Mutex<HashMap<String,String>>>`. At startup: mint access token via `refresh_access_token`, then call `get_devices` to pre-populate the devices cache (`name → id`). Empty map on failure; refreshed on first tool error.
+- Implemented `integrations/spotify/spotify_connection.rs`: `refresh_access_token` (form POST + Basic auth → bearer token) and `get_devices` (Bearer auth → `HashMap<name, id>`).
+- Added `reqwest` `form` feature to `Cargo.toml`. Consolidated to a single shared `reqwest::Client` (moved out of inline `Self {}` into a pre-constructed local so it can be passed to `refresh_access_token` before being moved into the struct).
+- Added `spotify_get_devices` tool end-to-end: `registry.rs` (no-args tool), `dispatch.rs` (now accepts `&AppState`), `implementations.rs` (locks `state.spotify_devices`, returns device names as serialized JSON). `ws.rs` updated to pass `&state` to `dispatch_tool`.
+- Verified the model can call `spotify_get_devices` and receive the device list.
+- Protected `.astra/astra.conf` in Claude Code settings (Read/Edit/Write denied — credentials file).
 
 ---
 

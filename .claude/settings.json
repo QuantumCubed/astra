@@ -47,7 +47,10 @@
     "deny": [
       "Read(.env)",
       "Edit(.env)",
-      "Write(.env)"
+      "Write(.env)",
+      "Read(.astra/astra.conf)",
+      "Edit(.astra/astra.conf)",
+      "Write(.astra/astra.conf)"
     ]
   },
   "hooks": {

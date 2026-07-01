@@ -9,3 +9,4 @@ tts-spike/target
 tts-spike/models
 tts-spike/runtime
 spike_output.wav
+etc/

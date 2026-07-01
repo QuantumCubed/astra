@@ -81,3 +81,16 @@ pub fn load_system_prompt() -> Result<String, std::io::Error> {
     load_dir(".astra/user", &mut prompt)?;
     Ok(prompt)
 }
+
+pub fn spotify_client_id(conf: &HashMap<String, String>) -> Option<&str> {
+    conf.get("SPOTIFY_CLIENT_ID").map(String::as_str)
+}
+
+pub fn spotify_client_secret(conf: &HashMap<String, String>) -> Option<&str> {
+    conf.get("SPOTIFY_CLIENT_SECRET").map(String::as_str)
+}
+
+pub fn spotify_refresh_token(conf: &HashMap<String, String>) -> Option<&str> {
+    conf.get("SPOTIFY_REFRESH_TOKEN").map(String::as_str)
+}
+

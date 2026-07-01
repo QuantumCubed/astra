@@ -1,6 +1,105 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-07-01
+---
+
+## `tokio::join!` for Concurrent Async Calls
+**Date:** 2026-07-01
+**Context:** Firing `get_states`, `get_entity_registry`, and `get_area_registry` in parallel inside `HaClient::get_devices()`
+**Source:** Claude
+
+`tokio::join!(a(), b(), c())` starts all three futures at the same time and waits for all of them to finish, returning their results as a tuple. This is distinct from sequential `.await` calls, where each future must complete before the next starts. Use it when the calls are independent — no result is needed as input to another. Each variable in the destructured tuple holds the `Result` from its corresponding future; you then unwrap each with `?` as normal. Concurrency here is within a single task (not separate threads) — `join!` interleaves polling rather than parallelising on multiple CPUs.
+
+---
+
+## `?` Inside a `filter_map` Closure as a Short-Circuit to `None`
+**Date:** 2026-07-01
+**Context:** Building `Vec<HaDevice>` from a `serde_json::Value` array inside `get_devices()`
+**Source:** Claude
+
+Inside a closure that returns `Option<T>`, the `?` operator short-circuits to `None` rather than propagating an error up the call stack. This makes it possible to write multi-step extraction logic concisely: `let id = entry["entity_id"].as_str()?` — if the field is missing or not a string, `as_str()` returns `None`, and `?` immediately returns `None` from the closure. Since `filter_map` discards `None` results automatically, any entry where a required field is absent is silently skipped without needing an explicit `if let` or `match`. This is the idiomatic pattern for "extract multiple required fields from loosely-typed data and skip malformed entries."
+
+---
+
+## Composition Over Inheritance — Rust Has No `extends`
+**Date:** 2026-06-28
+**Context:** Building `HaClient` to wrap a WebSocket connection with HA-specific protocol logic
+**Source:** Claude
+
+Rust has no inheritance. You cannot "extend" a type to add fields or override methods. Instead, Rust uses composition: you define a struct that *owns* the things it needs as fields, and put all the behaviour in an `impl` block. If you want a contract that multiple types can satisfy, that's a `trait` — the equivalent of an interface, not a base class. For `HaClient`, this means the struct owns the sink, message ID counter, and pending map as fields, and `impl HaClient` holds all the methods (`connect`, `call_service`, etc.). Nothing is inherited; everything is explicitly owned or borrowed.
+
+---
+
+## Double `??` for Unwrapping `Option<Result<T, E>>`
+**Date:** 2026-06-28
+**Context:** Receiving the first WebSocket frame from Home Assistant in `HaClient::connect()`
+**Source:** Claude
+
+`stream.next().await` returns `Option<Result<T, E>>` — `None` if the stream closed, `Ok(T)` if a frame arrived, `Err(E)` if it was malformed. To turn this into a plain `T` (or bail on failure), you use `.ok_or_else(|| anyhow!("..."))?` to convert the `Option` to `Result`, which gives you `Result<Result<T, E>, anyhow::Error>`. The first `?` unwraps the outer `Result`, leaving `Result<T, E>`. The second `?` unwraps the inner one, leaving `T`. Written inline: `stream.next().await.ok_or_else(|| anyhow!("closed"))??`. Each `?` peels off one layer.
+
+---
+
+## Pending-Map Pattern for Async Request-Response Matching
+**Date:** 2026-06-28
+**Context:** Designing `HaClient` to support multiple concurrent in-flight HA commands over one WebSocket
+**Source:** Claude
+
+When you have a single shared connection and want to send multiple requests concurrently without serializing them, you use a pending map: a `HashMap<id, oneshot::Sender<Response>>` shared between the sender and a background receiver task. The sender increments an atomic counter to get a unique ID, inserts a `oneshot::Sender` into the map under that ID, sends the request with the ID embedded, then awaits the `oneshot::Receiver`. The background task loops receiving frames; when it gets a response with an ID, it looks up the matching sender in the map, removes it, and sends the response through the oneshot. This pattern allows many in-flight requests to coexist — each waits independently on its own oneshot channel rather than blocking the shared connection.
+
+---
+
+## `if let` for Single-Branch Pattern Matching on `Option`
+**Date:** 2026-06-28
+**Context:** Conditionally attaching a `device_id` query param to a Spotify API request only when present
+**Source:** Claude
+
+`if let Some(id) = device_id` is a concise way to match one variant of an enum and bind its inner value at the same time. If `device_id` is `Some`, the block runs with `id` bound to the inner value; if it's `None`, the block is skipped entirely. It is equivalent to a `match` with one arm you care about, but shorter when you only need one branch. The bound variable (`id`) can be any name — it doesn't have to match the original variable, which matters when the types differ (`Option<String>` → `String`) or when you want to shadow with the same name.
+
+---
+
+## `String` vs `&str` in Structs — Ownership and Lifetimes
+**Date:** 2026-06-28
+**Context:** Building `SpotifyPlayRequest` and `SpotifySearchItem` structs for Spotify API calls
+**Source:** Claude
+
+`&str` is a borrowed reference — it doesn't own its data and requires an explicit lifetime annotation on any struct that holds it (`struct Foo<'a> { field: &'a str }`). That lifetime then propagates to every function that constructs or uses the struct. `String` owns its data, making the struct self-contained with no lifetime parameter. For short-lived request body structs that are constructed, serialized, and dropped in one function, `String` is the right choice — the ownership overhead is negligible and the code stays simple.
+
+---
+
+## `Vec<Option<T>>` + `.flatten()` for Nullable JSON Arrays
+**Date:** 2026-06-28
+**Context:** Deserializing Spotify's search response, whose `items` arrays can contain null entries
+**Source:** Claude
+
+When a JSON array can contain `null` entries alongside real objects, `Vec<T>` will fail to deserialize because serde can't map `null` to a struct. Changing the element type to `Option<T>` tells serde that each element is either a valid item (`Some`) or null (`None`). After deserialization, `.into_iter().flatten()` skips all `None` entries and unwraps the `Some` values, giving a clean iterator of `T`. This is the idiomatic pattern for "nullable array elements" in serde — no manual filtering needed.
+
+---
+
+## `.to_string()` vs `.clone()` for Type Conversion
+**Date:** 2026-06-28
+**Context:** Converting `&str` URI values into owned `String` fields in `SpotifyPlayRequest`
+**Source:** Claude
+
+`.clone()` copies a value into a new instance of the *same type* — it's for `String → String`. `.to_string()` converts a value *into* a `String` from a different type — it's for `&str → String`. Both compile when the source is `&str` (because `&str` also implements `Clone` via a round-trip), but `.to_string()` expresses the intent clearly: you're converting, not copying. Use `.clone()` when the source is already a `String`; use `.to_string()` when the source is `&str`.
+
+---
+
+## `into_iter()` Transfers Ownership vs `iter()` Which Borrows
+**Date:** 2026-06-27
+**Context:** Building a `HashMap` from a `Vec<SpotifyDevice>` in `get_devices` in `spotify_connection.rs`
+**Source:** Self-discovered
+
+`iter()` gives you references to each element (`&T`) — the original collection keeps ownership. `into_iter()` consumes the collection and gives you owned values (`T`), transferring ownership into the iterator. When you need to move fields out of each element (like `String` fields you want to put into a new collection), `into_iter()` is the right choice — with `iter()` you'd have to clone those strings since you only have a reference. In the closure, `|sd|` receives an owned value with `into_iter()`, whereas `|&sd|` or `|sd|` with `iter()` receives a reference.
+
+---
+
+## `.collect()` Infers the Target Collection from the Return Type
+**Date:** 2026-06-27
+**Context:** Collecting an iterator of `(String, String)` tuples into a `HashMap` in `get_devices`
+**Source:** Self-discovered
+
+`.collect()` is a generic method that can produce many different collection types — `Vec`, `HashMap`, `HashSet`, and others. It figures out which one to build by looking at the expected type from context, most often the function's return type. If the function returns `Result<HashMap<String, String>, E>`, the compiler sees that `Ok(...)` must contain a `HashMap<String, String>` and tells `.collect()` to build that. You rarely need to annotate the type explicitly — the return signature does the work.
+
 ---
 
 # Concepts

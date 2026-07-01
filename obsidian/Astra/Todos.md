@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-07-01
 ---
 
 # Todos
@@ -21,13 +21,44 @@ updated: 2026-06-25
 - [ ] Interruption handling — user speaks while the assistant is responding
 - [ ] (Deferred, only if needed) GPU ONNX decode — would need a crate fork to add a CUDA execution provider; unnecessary while RTF < 1
 
+### Home Assistant
+
+- [ ] Area-based device toggling — toggle all devices in a room by area name (e.g. "turn off the bonus room lights")
+- [ ] Implement event subscriptions in `event_loop` (currently stubs only)
+- [ ] `call_service` with `service_data` for services that require parameters (e.g. light brightness, colour)
+- [ ] Refactor Spotify into `SpotifyCtx` — move `spotify_token`, `spotify_devices` out of raw `AppState` fields; mirrors the `HaClient` modular pattern
+
 ### Phase 3 — Tool Layer
 
 - [ ] Refactor tool implementations into per-tool modules
 - [ ] Structured tool error handling (tool failures must not crash the request)
-- [ ] Define and implement first real tool
+- [ ] Spotify: implement 401 → refresh token → retry path in play/pause/search implementations
+- [ ] Spotify: bootstrapping HTTP endpoint to automate OAuth flow and write tokens to `astra.conf`
+- [ ] Spotify: refactor into `SpotifyCtx` struct — move `spotify_token`, `spotify_devices` out of raw `AppState` fields; add `integrations/spotify/config.rs`
+- [ ] Spotify: implement `spotify_swap_playback(from_device, to_device)` — seamlessly transfer active playback from one device to another
+- [ ] Spotify: implement `spotify_queue(uri)` — add a track to the current play queue
 
 ## Done
+
+- [x] Home Assistant: `ha_get_devices`, `ha_toggle_device`, `ha_reconnect` tools wired end-to-end through `registry.rs`, `implementations.rs`, `dispatch.rs`
+- [x] Home Assistant: `HaClient::reconnect()` + `establish()` helper — reconnects the WebSocket without restarting the server; old `event_loop` dies naturally when the dropped connection closes
+- [x] Home Assistant: `call_service(domain, service, entity_id)` on `HaClient` via `send_command` abstraction
+- [x] Home Assistant: `get_devices()` — three-way join of `get_states` + `get_entity_registry` + `get_area_registry` via `tokio::join!`; filtered to `disabled_by == null` + `should_expose == true`; returns `Vec<HaDevice>`
+- [x] Home Assistant: `HaDevice` struct in `ha/types.rs` (`entity_id`, `friendly_name`, `aliases`, `area`, `state`)
+- [x] Home Assistant: `send_command` private method on `HaClient` — abstracts id injection, pending-map registration, sink lock, and success check; all public methods are now one-liners
+- [x] Home Assistant: `get_entity_registry` and `get_area_registry` methods on `HaClient`
+- [x] Home Assistant: `HaClient` struct, `connect()` auth handshake, split WebSocket, background `event_loop` (stub), pending-map for response matching; `Option<Arc<HaClient>>` in `AppState`; graceful startup on HA unavailable
+- [x] Spotify: `spotify_search(query)` tool — searches tracks, albums, playlists; returns `Vec<(name, uri)>` as JSON for the model to choose from; null items handled via `Vec<Option<T>>` + `.flatten()`
+- [x] Spotify: `spotify_play_content(uri, device_name?)` tool — plays a URI on a named or active device; routes `spotify:track:` to `uris[]`, others to `context_uri`; falls back to active device if name not in cache
+- [x] Spotify: `spotify_pause_content` tool — pauses on active device
+- [x] Spotify: `spotify_resume_content` tool — resumes on active device
+- [x] reqwest `"query"` feature added to `Cargo.toml` (`.query()` is not in core in 0.13)
+- [x] Spotify: `spotify_get_devices` tool — reads cached `state.spotify_devices`, returns device names as JSON; `dispatch_tool` updated to accept `&AppState`
+- [x] Spotify: `integrations/spotify/spotify_connection.rs` — `refresh_access_token` (form POST, Basic auth) and `get_devices` (Bearer auth, returns `HashMap<name, id>`)
+- [x] Spotify: `AppState` extended with `spotify_token: Arc<Mutex<String>>` and `spotify_devices: Arc<Mutex<HashMap<String,String>>>`; access token minted at startup
+- [x] Spotify: credentials (`SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`) added to `astra.conf` and reader functions added to `config.rs`
+- [x] `reqwest` `form` feature added to `Cargo.toml`
+- [x] Single shared `reqwest::Client` for all integrations — moved from inline `Self {}` to pre-constructed local in `AppState::new()`
 
 - [x] Sub-sentence TTS streaming — `synthesize_sentence_streaming` forwards PCM chunks (~320 ms) via a `tokio::mpsc` channel as the decoder emits them; web client plays them gapless via a Web Audio scheduling cursor (replaces buffer-then-play)
 - [x] Transcript synced to audio — new `tts_sentence` protocol marker; web client reveals each sentence's text on the Web Audio clock as it's spoken

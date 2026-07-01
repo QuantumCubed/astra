@@ -3,6 +3,7 @@ use axum::{Router, routing::get};
 mod backend;
 mod handlers;
 mod tools;
+mod integrations;
 
 use crate::handlers::ws::ws_handler;
 use crate::backend::state::AppState;

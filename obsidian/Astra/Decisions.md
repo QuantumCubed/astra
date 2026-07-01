@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-07-01
 ---
 
 # Decisions
@@ -291,6 +291,128 @@ A log of significant technical and architectural decisions, including the reason
 **Reasoning:** At RTF < 1 the audio keeps up once it starts, but whole-sentence synthesis still cost multiple seconds of time-to-first-audio on long sentences; per-chunk streaming drops that to a few hundred ms. The transcript can't be synced client-side (the PCM stream has no sentence boundaries), so the server marks each sentence; revealing on the Web Audio clock — not on receipt — keeps text aligned to speech even as the synthesis buffer runs ahead of playback. The old client buffered every frame and played one blob at `tts_end`; that path is removed.
 
 **Consequences:** `tts_start`/`tts_sentence` are now required by the web client (it waits for `tts_start` to learn the sample rate), so server + client must be deployed together. The displayed transcript is the spoken (stripped) text, not full markdown. Per-word sync would need finer markers; per-sentence is the current granularity.
+
+---
+
+## 2026-06-28 — Spotify integration: credentials in astra.conf, manual OAuth for dev
+
+**Decision:** Spotify credentials (`SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`) are stored in `.astra/astra.conf`. The initial refresh token is obtained manually via a one-time browser OAuth flow and pasted into the conf file. A future bootstrapping HTTP endpoint will automate this.
+
+**Reasoning:** Keeps credentials alongside other runtime config and out of the codebase. The manual flow is a dev-phase shortcut — the refresh token is long-lived (~6 months) so it only needs to be set once per rotation. The bootstrapping endpoint is deferred until the OAuth callback wiring is worth the complexity.
+
+---
+
+## 2026-06-28 — Single shared `reqwest::Client` for all integrations
+
+**Decision:** The single `reqwest::Client` in `AppState` is shared across all HTTP integrations (Ollama, Spotify, and future integrations). It is created as a local variable before `Self { }` in `AppState::new()` and moved into the struct.
+
+**Reasoning:** `reqwest::Client` manages an internal connection pool. Multiple clients waste resources and lose the benefit of connection reuse. A single client is the idiomatic pattern; each integration receives `&state.client` at the call site.
+
+---
+
+## 2026-06-28 — Integration functions receive specific values, not `AppState`
+
+**Decision:** Functions in `src/integrations/` take the specific values they need (`client: &reqwest::Client`, `token: &str`, etc.) as arguments rather than accepting `&AppState`. Only `dispatch.rs` and `implementations.rs` know about `AppState` and extract the relevant fields before calling down.
+
+**Reasoning:** Keeps integration code decoupled from Axum and independently testable. The arg threading is minimal (two levels: dispatch → implementation → integration); the architectural benefit outweighs the verbosity.
+
+---
+
+## 2026-06-28 — `dispatch_tool` accepts `&AppState`
+
+**Decision:** `dispatch_tool` signature changed from `(tool_name, args)` to `(tool_name, args, state: &AppState)`. The call site in `ws.rs` passes `&state`.
+
+**Reasoning:** Integration tools need access to `AppState` fields (token, devices cache, client). Passing the whole state to dispatch is the natural boundary — dispatch extracts what each implementation needs rather than threading `AppState` through every implementation signature.
+
+---
+
+## 2026-06-28 — Lazy Spotify device resolution with startup cache
+
+**Decision:** `get_devices` is called once at startup to populate `state.spotify_devices` (a `Mutex<HashMap<name → id>>`). If startup fails (Spotify not open), the map starts empty and is refreshed on the first tool call error. No device IDs are persisted across restarts.
+
+**Reasoning:** Spotify device IDs are only valid while the app is running on that device. Storing them across restarts is meaningless. A startup call gives the model immediate device info for the first command; the refresh-on-error fallback handles stale IDs without complicating startup.
+
+---
+
+## 2026-06-28 — Spotify device nicknames deferred to persistent storage phase
+
+**Decision:** User-defined device nicknames ("my pc" → "AK-DESKTOP") are deferred until Astra has persistent storage (DB / RAG). No config-file nickname mapping will be built in the interim.
+
+**Reasoning:** A config-file hack would be thrown away once persistent storage is introduced. The current device name returned by Spotify's API is descriptive enough for the model to work with.
+
+---
+
+## 2026-06-28 — Two-step search pattern: model picks URI before calling play
+
+**Decision:** Spotify playback is split into two tools: `spotify_search(query)` returns a `(name, uri)` list for the model to reason over, and `spotify_play_content(uri)` takes a URI the model already chose. The model handles content selection between the two calls.
+
+**Reasoning:** Embedding search inside `play` would force the implementation to pick a result without model judgment. Returning results to the model lets it match user intent (e.g. preferring a playlist over a track, or a specific album). Keeps each tool single-purpose.
+
+---
+
+## 2026-06-28 — `play` and `resume` are separate tools
+
+**Decision:** `spotify_play_content` (sends a JSON body with a URI) and `spotify_resume_content` (no body, resumes current playback) are registered as distinct tools.
+
+**Reasoning:** They have different parameter shapes — the model shouldn't have to decide which mode to use via an optional field. Separate tools with distinct descriptions make the intent unambiguous and reduce model error.
+
+---
+
+## 2026-06-28 — Spotify device fallback to active client on cache miss
+
+**Decision:** If a requested device name is not found in `state.spotify_devices`, `device_id` is passed as `None` and Spotify falls back to the most recently active client. No error is returned.
+
+**Reasoning:** 99% of pause/resume/play calls target the active device anyway. A cache miss on an unrecognized name is better handled by Spotify's own fallback than by erroring out — the playback usually ends up on the right device.
+
+---
+
+## 2026-06-28 — Modular integrations architecture: integration structs own their state and config
+
+**Decision:** Each integration owns its state in a dedicated struct (`HaClient`, future `SpotifyCtx`) rather than spreading raw fields across `AppState`. `AppState` stores `Arc<IntegrationStruct>` references only. Each integration also owns its config loading via a local `config.rs` (`integrations/home/ha/config.rs`, `integrations/spotify/config.rs`), calling the shared `load_conf()` from `backend/config.rs` to parse the file but extracting only its own keys. `backend/config.rs` is trimmed to core concerns: Ollama URL, model, system prompt, Whisper path.
+
+**Reasoning:** `AppState` was growing into a god object — Spotify tokens, device caches, TTS, Whisper, all as raw fields. Each new integration would worsen this. Encapsulating state and config per-integration keeps `AppState` as a thin registry, makes integrations independently testable (no `AppState` dependency), and lets each integration manage its own lifecycle (connect, reconnect, token refresh) without touching `AppState::new()`.
+
+**Migration:** Spotify will be refactored from raw `AppState` fields into a `SpotifyCtx` struct as a follow-up. `SpotifyCtx` rather than `SpotifyClient` — there is no persistent connection to Spotify, only stateless HTTP calls with a cached token; the name reflects that.
+
+---
+
+## 2026-06-28 — Home Assistant integration: split WebSocket connection with pending-map
+
+**Decision:** The Home Assistant integration connects via `tokio-tungstenite` at startup, performs the HA auth handshake (`auth_required` → `auth` → `auth_ok`), then splits the connection into a `SplitSink` (stored in `HaClient`) and a `SplitStream` (driven by a background task). Event subscriptions are stubbed now; the infrastructure supports them from the start. Response matching uses a pending-map: `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` keyed by the HA message ID. `HaClient` is stored in `AppState` as `Arc<HaClient>`.
+
+**Reasoning:** A mutex-over-full-connection would serialize all HA calls and make event subscriptions impossible. Splitting from the start avoids a non-trivial refactor later. The pending-map allows multiple concurrent in-flight commands without serializing the sink. `AtomicU32` for the message ID counter is lock-free and correct for concurrent increments.
+
+---
+
+## 2026-07-01 — HA reconnect logic lives inside `HaClient`, not `AppState`
+
+**Decision:** `HaClient::reconnect()` re-establishes the HA WebSocket connection by calling a private `establish()` helper (extracted from `connect()`), then replacing the internal sink, resetting the message ID counter, clearing in-flight pending entries, and spawning a new `event_loop`. `AppState.ha_client` remains `Option<Arc<HaClient>>` — no `Mutex` wrapper needed.
+
+**Reasoning:** The alternative — wrapping `ha_client` in `Mutex<Option<Arc<HaClient>>>` so it could be swapped at runtime — would require every HA dispatch arm to lock the mutex on every call. More importantly, each integration should own its own lifecycle; `AppState` is a thin registry, not a lifecycle manager. Keeping reconnect self-contained inside `HaClient` is consistent with the modular integrations pattern and doesn't bleed HA concerns into `AppState`. The old `event_loop` exits naturally when the dropped TCP connection's stream returns `None`, so no explicit cancellation signal is needed.
+
+---
+
+## 2026-07-01 — `HaDevice` custom type: join of three HA data sources, filtered by `should_expose`
+
+**Decision:** The model is given a custom `HaDevice` type (defined in `ha/types.rs`) instead of raw HA state. `get_devices()` on `HaClient` fires `get_states`, `get_entity_registry`, and `get_area_registry` concurrently via `tokio::join!`, then filters the entity registry to entities where `disabled_by == null` AND `options.conversation.should_expose == true`, and joins with state and area data to produce `Vec<HaDevice { entity_id, friendly_name, aliases, area, state }>`.
+
+**Reasoning:** Raw `get_states` returns 50–200 KB of JSON (all entities + all attributes), which caused 56 s first-token latency. HA's own `should_expose` field (set per-entity in the HA UI) is designed exactly for conversation assistants — it distinguishes user-controllable entities from diagnostic subcomponents without requiring Astra to reason about entity domains or categories. Joining with the area registry gives the model room context ("Bonus Room") which it otherwise lacks entirely.
+
+---
+
+## 2026-07-01 — `send_command` private method abstracts all HA WebSocket plumbing
+
+**Decision:** A private `send_command(&self, payload: Value) -> anyhow::Result<Value>` method on `HaClient` handles ID injection, pending-map registration, sink lock, send, await, and success check. All public methods (`get_states`, `get_entity_registry`, `get_area_registry`, `call_service`) are one-liners that build a payload and delegate to it.
+
+**Reasoning:** Every HA command follows identical plumbing — only the message type and extra fields vary. Without the abstraction, adding `get_entity_registry` and `get_area_registry` would have tripled the boilerplate. `send_command` takes a `Value` rather than a typed struct because HA commands have widely varying shapes; using `serde_json::json!` at the call site is already concise and does not benefit from an additional struct layer.
+
+---
+
+## 2026-07-01 — HA toggle via `homeassistant.toggle` service; separate on/off deferred
+
+**Decision:** The first HA control tool is `ha_toggle_device(entity_id)`, which calls `homeassistant.toggle` via `call_service`. Separate `ha_turn_on` / `ha_turn_off` tools are deferred.
+
+**Reasoning:** Toggle covers the common case with one tool and no ambiguity in tool selection. The only scenario where toggle falls short is "make sure the lights are on" (toggle could turn them off if already on), but that requires state awareness the model can get via `ha_get_devices` in a preceding call. Separate on/off can be added once the basic control flow is validated end-to-end.
 
 ---
 

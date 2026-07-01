@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-25
+updated: 2026-07-01
 ---
 
 # Architecture
@@ -35,8 +35,8 @@ WebSocket client
 | Module | Responsibility |
 |---|---|
 | `src/main.rs` | Router setup, server startup, AppState init, `tracing_subscriber` logging init |
-| `src/backend/state.rs` | `AppState` (read-only fields shared via `Arc`) — `Arc<Vec<Tool>>`, `Arc<str>` system prompt, Ollama URL + model, reqwest client, `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>` (qwen3-tts), `Arc<VoiceFile>` speaker |
-| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; parses `astra.conf` once into a map (`OLLAMA_ENDPOINT`, `OLLAMA_MODEL`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_QUANT`) |
+| `src/backend/state.rs` | `AppState` (read-only fields shared via `Arc`) — `Arc<Vec<Tool>>`, `Arc<str>` system prompt, Ollama URL + model, reqwest client (shared across all integrations), `Arc<WhisperContext>`, `Arc<Mutex<TtsEngine>>` (qwen3-tts), `Arc<VoiceFile>` speaker, `Arc<Mutex<String>>` Spotify access token, `Arc<Mutex<HashMap<String,String>>>` Spotify devices cache (`name → id`), `Option<Arc<HaClient>>` Home Assistant client (None if HA unreachable at startup) |
+| `src/backend/config.rs` | Loads `.astra/core/*.md` + `.astra/user/*.md` into system prompt; parses `astra.conf` once into a map. Core keys: `OLLAMA_ENDPOINT`, `OLLAMA_MODEL`, `WHISPER_MODEL`, `TTS_VOICE`, `TTS_MAX_TOKENS`, `TTS_QUANT`. Integration-specific keys live in each integration's own `config.rs`. |
 | `src/backend/protocol.rs` | WebSocket message schema — `Envelope`, `Message` enum, payload structs |
 | `src/backend/conversation.rs` | Per-connection message history with sliding window enforcement |
 | `src/backend/ollama/client.rs` | reqwest wrapper around Ollama `/api/chat` |
@@ -46,8 +46,18 @@ WebSocket client
 | `src/backend/audio/tts.rs` | TTS — `load_tts_model` + `synthesize_sentence_streaming` (qwen3-tts `TtsEngine`, `spawn_blocking`, streams PCM chunks via a `tokio::mpsc` channel); `strip_markdown` + `take_sentences` pre-process LLM output |
 | `src/handlers/ws.rs` | WebSocket upgrade handler, per-connection loop, agent loop, audio buffer, full voice pipeline |
 | `src/tools/registry.rs` | `Tool`/`ToolFunction` structs, `register_tools()` |
-| `src/tools/dispatch.rs` | Routes tool call by name to implementation |
-| `src/tools/implementations.rs` | Async tool logic (`tokio::process::Command`) |
+| `src/tools/dispatch.rs` | Routes tool call by name to implementation; accepts `&AppState` for integration access |
+| `src/tools/implementations.rs` | Async tool logic (`tokio::process::Command` for shell tools; reads `AppState` fields for integration tools) |
+| `src/integrations.rs` | Integrations module root |
+| `src/integrations/web.rs` | Web integrations sub-module root |
+| `src/integrations/web/ddg_search.rs` | DuckDuckGo search (stub) |
+| `src/integrations/spotify.rs` | Spotify sub-module root |
+| `src/integrations/spotify/spotify_connection.rs` | Spotify API — `refresh_access_token`, `get_devices`, `play`, `pause`, `resume`, `search`; pure functions, no `AppState` dependency |
+| `src/integrations/home.rs` | Home integrations sub-module root |
+| `src/integrations/home/ha.rs` | HA sub-module root |
+| `src/integrations/home/ha/home_assistant.rs` | `HaClient` struct — `Arc<Mutex<SplitSink>>` sink, `AtomicU32` message ID counter, `Arc<Mutex<HashMap<u32, oneshot::Sender<Value>>>>` pending map; `connect()` + `establish()` (shared auth handshake) + `reconnect()` (swaps sink, resets counter + pending, spawns new event_loop); private `send_command(payload)` abstracts all HA WS plumbing; public methods: `get_states`, `get_entity_registry`, `get_area_registry`, `get_devices`, `call_service` |
+| `src/integrations/home/ha/types.rs` | `HaDevice` struct — `entity_id`, `friendly_name`, `aliases: Vec<String>`, `area: Option<String>`, `state`; derives `Serialize` + `Debug` |
+| `src/integrations/home/ha/config.rs` | HA config getters — `ha_url()`, `ha_token()` (keys: `HOME_ASSISTANT_ENDPOINT`, `HOME_ASSISTANT_TOKEN`) |
 
 ## Conversation State
 
@@ -125,3 +135,11 @@ binary WS frames (PCM chunks)
 |---|---|
 | `echo_hello_world` | Echoes "Hello, World!" via shell command |
 | `list_contents` | Lists working directory contents |
+| `spotify_get_devices` | Returns cached list of active Spotify device names |
+| `spotify_search` | Searches Spotify for tracks, albums, playlists — returns `(name, uri)` list for model to choose from |
+| `spotify_play_content` | Plays a Spotify URI on a named or active device |
+| `spotify_pause_content` | Pauses playback on the active device |
+| `spotify_resume_content` | Resumes playback on the active device |
+| `ha_get_devices` | Returns `Vec<HaDevice>` — three-way join of HA state + entity registry + area registry, filtered to `should_expose == true` entities |
+| `ha_toggle_device` | Calls `homeassistant.toggle` on a given `entity_id` |
+| `ha_reconnect` | Re-establishes the HA WebSocket connection without restarting the server |
