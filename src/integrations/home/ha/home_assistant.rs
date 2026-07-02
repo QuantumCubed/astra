@@ -10,7 +10,7 @@ use tungstenite::Message;
 
 use crate::backend::config::load_conf;
 use crate::integrations::home::ha::config::{ha_token, ha_url};
-use crate::integrations::home::ha::types::HaDevice;
+use crate::integrations::home::ha::types::{HaArea, HaDevice};
 
 type WsSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 type WsStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
@@ -149,24 +149,49 @@ impl HaClient {
         self.send_command(serde_json::json!({"type": "config/area_registry/list"})).await
     }
 
+    pub async fn get_device_registry(&self) -> anyhow::Result<Value> {
+        self.send_command(serde_json::json!({"type": "config/device_registry/list"})).await
+    }
+
     pub async fn get_devices(&self) -> anyhow::Result<Vec<HaDevice>> {
-        let (states_res, entity_res, area_res) = tokio::join!(
+        let (states_res, entity_res, area_res, device_res) = tokio::join!(
             self.get_states(),
             self.get_entity_registry(),
             self.get_area_registry(),
+            self.get_device_registry(),
         );
         let states = states_res?;
         let entities = entity_res?;
         let areas = area_res?;
+        let devices_raw = device_res?;
 
-        let area_map: HashMap<String, String> = areas
+        // area_id → (area_id, name, aliases)
+        let area_map: HashMap<String, (String, String, Vec<String>)> = areas
             .as_array()
             .unwrap_or(&vec![])
             .iter()
             .filter_map(|a| {
                 let id = a["area_id"].as_str()?;
                 let name = a["name"].as_str()?;
-                Some((id.to_string(), name.to_string()))
+                let aliases = a["aliases"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                Some((id.to_string(), (id.to_string(), name.to_string(), aliases)))
+            })
+            .collect();
+
+        // device_id → area_id
+        let device_map: HashMap<String, String> = devices_raw
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|d| {
+                let device_id = d["id"].as_str()?;
+                let area_id = d["area_id"].as_str()?;
+                Some((device_id.to_string(), area_id.to_string()))
             })
             .collect();
 
@@ -205,9 +230,16 @@ impl HaClient {
                     .iter()
                     .filter_map(|a| a.as_str().map(String::from))
                     .collect();
-                let area = e["area_id"].as_str()
-                    .and_then(|id| area_map.get(id))
-                    .cloned();
+                let area_id = e["area_id"].as_str()
+                    .map(str::to_string)
+                    .or_else(|| e["device_id"].as_str().and_then(|did| device_map.get(did)).cloned());
+                let area = area_id.and_then(|id| {
+                    area_map.get(&id).map(|(aid, name, aliases)| HaArea {
+                        id: aid.clone(),
+                        name: name.clone(),
+                        aliases: aliases.clone(),
+                    })
+                });
                 let state = state_map.get(entity_id)
                     .cloned()
                     .unwrap_or_else(|| "unknown".to_string());
