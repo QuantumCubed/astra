@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-07-01
+updated: 2026-07-02
 ---
 
 # Decisions
@@ -421,3 +421,29 @@ A log of significant technical and architectural decisions, including the reason
 **Decision:** Tools are registered at startup into `AppState`, which is cloned into every request via Axum's `State` extractor.
 
 **Reasoning:** Tools don't change at runtime, so a shared immutable list owned by `AppState` is the right fit. Avoids global state and keeps everything within Axum's ownership model.
+
+---
+
+## 2026-07-02 — Multi-user accounts: SQLite via `sqlx` for persistence
+
+**Decision:** Astra moves from an in-memory-only, single implicit user to real multi-user accounts backed by a local SQLite database (`.astra/astra.db`), accessed via `sqlx` (`runtime-tokio`, `sqlite`, `derive`, `migrate`, `uuid`, `chrono` features). Schema: `users`, `sessions`, `conversations`, `messages` tables, versioned under a `migrations/` directory and applied via `sqlx::migrate!()` at startup.
+
+**Reasoning:** Astra is one binary on one home box — a separate Postgres service would be unjustified operational weight for no benefit at this scale. `sqlx` also ships a Postgres driver, so if Astra is ever split onto a separate DB host later, it's a driver/connection-string swap, not a rewrite. This closes the gap flagged in the 2026-06-20 "Astra owns all conversation state" decision, which explicitly deferred persistence "until multi-session or restart-survival is needed" — that threshold is now reached: per-user conversation history and multiple named conversation threads per user both require it.
+
+**Deferred:** Per-user Spotify/HA credentials (moving `spotify_token`/`ha_client` from global `AppState` fields to DB-backed, per-user rows) are an explicit non-goal of this pass. The schema leaves the seam open for a future `user_integrations` table keyed on `users.id`, but does not build it.
+
+---
+
+## 2026-07-02 — Opaque, hashed session tokens instead of JWT
+
+**Decision:** Session tokens are server-generated random opaque strings, hashed (SHA-256) before being stored in the `sessions` table — the raw token is returned to the client once at login and never persisted. JWT was considered and rejected for this use case.
+
+**Reasoning:** Astra is a single monolith that both issues and verifies its own tokens — JWT's main advantage (independent verification without a DB round-trip across services) doesn't apply here, while its main disadvantage (no cheap revocation without maintaining a blocklist) is a real cost. An opaque token is revoked with a single `DELETE FROM sessions`. Passwords (Argon2id, deliberately slow — defends against guessing a low-entropy human password) and session tokens (SHA-256, deliberately fast — the token is already high-entropy/random, so a slow hash only adds latency with no security benefit) intentionally use different hashing algorithms for this reason. Worth revisiting only if a second, independently-verifying service is introduced later.
+
+---
+
+## 2026-07-02 — CLI-only account creation; no public WS registration message
+
+**Decision:** New user accounts are created via a CLI subcommand (`astra user create <username>`, hidden password prompt via `rpassword`) that bypasses `AppState::new()` entirely, so heavy startup work (Whisper, TTS, Spotify, HA) never runs just to insert a row. No `Register` message is exposed on the `/ws` protocol.
+
+**Reasoning:** Even on a trusted LAN/ZeroTier network, "anyone who can open a TCP connection can mint an account" is a habit worth avoiding, especially since the stated goal is auth built to hold up if exposure ever changes. Requiring shell access to the host is a meaningfully higher bar than a WS message. Login and session-resume (`Login`, `ResumeSession` message types) still happen entirely over `/ws`, consistent with the existing 2026-06-13 "WebSocket as the primary transport layer" decision — auth is a new message type over the same connection, not a new HTTP surface. Easy upgrade path if self-service signup is wanted later: an admin-gated WS message, using the `is_admin` flag already included in the `users` schema.

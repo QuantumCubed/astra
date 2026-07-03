@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-07-01
+updated: 2026-07-02
 ---
 
 # Todos
@@ -12,6 +12,21 @@ updated: 2026-07-01
 - [ ] Full mic → STT → LLM → TTS round-trip test with the web client (blocked: mic capture needs a secure context — see Backlog)
 
 ## Backlog
+
+### Multi-User Accounts & Auth (planned — see [[Decisions]] 2026-07-02, [[Roadmap]] Phase 3)
+
+- [ ] Write `migrations/0001_create_users.sql` .. `0004_create_messages.sql`
+- [ ] `backend/db.rs` + `backend/db/{users,sessions,conversations,messages}.rs`
+- [ ] `backend/auth.rs` + `backend/auth/{password,session}.rs`
+- [ ] CLI `astra user create <username>` subcommand with `rpassword` hidden input
+- [ ] New protocol messages in `backend/protocol.rs` (`Login`, `ResumeSession`, `AuthResult`, `ListConversations`, `CreateConversation`, `SwitchConversation`, `ConversationSwitched`)
+- [ ] `ws.rs`: `authenticate()` pre-auth gate with 15s `tokio::time::timeout`
+- [ ] `conversation.rs`: `Conversation::load`/persist-per-turn rework, DB is source of truth, in-memory vec stays a context-window trim only
+- [ ] `SwitchConversation` ownership check (`WHERE id = ? AND user_id = ?`) — do not skip
+- [ ] `AppState.db: SqlitePool` field; `main.rs` connect+migrate at startup, ahead of `AppState::new()`
+- [ ] Unit tests: `auth::password`, `auth::session`, protocol round-trip, `db::*` ownership isolation
+- [ ] Manual end-to-end verification via `websocat` (login, resume, conversation switch, negative tests)
+- [ ] Update `Architecture.md` once the above lands
 
 ### Phase 2 — Voice Pipeline
 

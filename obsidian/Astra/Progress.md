@@ -1,11 +1,21 @@
 ---
 created: 2026-06-13
-updated: 2026-07-01
+updated: 2026-07-02
 ---
 
 # Progress
 
 [[ASTRA|← Home]]
+
+---
+
+## 2026-07-02 — Multi-user accounts & auth: design finalized, implementation pending
+
+- No code changed this session — this was a design pass. Astra had zero identity concept (`/ws` fully open, `AppState` fully global, `Conversation` in-memory-only per connection with no id); the user requested true multi-user accounts as infrastructure for future per-user integrations and multiple conversation threads per user.
+- Explored current code (`state.rs`, `conversation.rs`, `ws.rs`, `protocol.rs`, `main.rs`, `Cargo.toml`) and the Obsidian vault to confirm this was a deliberate prior deferral (Roadmap's "not in scope yet," Decisions' "deferred until multi-session or restart-survival is needed") rather than an oversight.
+- Finalized design: SQLite via `sqlx` (`users`, `sessions`, `conversations`, `messages` tables, `migrations/` dir); Argon2id password hashing + opaque SHA-256-hashed session tokens (JWT rejected — see [[Decisions]]); CLI-only account creation (no public WS registration message); auth as new `Login`/`ResumeSession`/`AuthResult` message types over the existing `/ws` connection, consistent with the project's WebSocket-only transport rule; `Conversation` reworked so the DB holds the full transcript while the in-memory sliding window stays purely an LLM-context-size trim.
+- Full plan (schema, module layout, protocol additions, order of implementation, verification steps) refined via a cloud Ultraplan session and approved; the user is implementing it themselves rather than having it auto-executed, per this project's collaboration style (explain/point, let the user write the code).
+- See [[Decisions]] (three new 2026-07-02 entries) and [[Roadmap]] Phase 3 / [[Todos]] Backlog for the concrete task breakdown.
 
 ---
 

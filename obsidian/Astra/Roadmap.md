@@ -1,6 +1,6 @@
 ---
 created: 2026-06-13
-updated: 2026-06-28
+updated: 2026-07-02
 ---
 
 # Roadmap
@@ -114,6 +114,23 @@ Error codes are deferred — defined when the full set of error cases is known.
 - [ ] 401 → refresh token → retry path
 - [ ] Bootstrapping endpoint to automate OAuth and write tokens to `astra.conf`
 
+### Multi-User Accounts & Sessions (planned — see [[Decisions]] 2026-07-02)
+
+**Why here:** motivated directly by this phase's integration work — Astra needs to know *which* user it's acting on behalf of before per-user Spotify/HA credentials and per-user conversation history are possible. Auth is a new message type over the existing `/ws` connection, not a new HTTP surface, per the Phase 1 transport decision.
+
+- [ ] Migrations: `users`, `sessions`, `conversations`, `messages` tables
+- [ ] `backend/db.rs` + submodules (`users`, `sessions`, `conversations`, `messages`) — DB access layer
+- [ ] `backend/auth.rs` + submodules (`password`, `session`) — Argon2id password hashing, opaque hashed session tokens
+- [ ] CLI `astra user create <username>` subcommand (bypasses `AppState::new()`, no model loads)
+- [ ] Protocol: `Login`, `ResumeSession`, `AuthResult`, `ListConversations`, `CreateConversation`, `SwitchConversation`, `ConversationSwitched` message types
+- [ ] `ws.rs` auth gate — 15s timeout on the pre-auth phase, generic invalid-credentials error, hard-reject non-auth messages before login
+- [ ] `conversation.rs` rework — DB-backed load/persist; sliding window stays an in-memory-only LLM-context trim, not the source of truth
+- [ ] Conversation-switch ownership check (`WHERE id = ? AND user_id = ?`) — the one place multi-user isolation actually lives
+- [ ] `AppState`/`main.rs` wiring — `db: SqlitePool` field, migrate-at-startup
+- [ ] Update `Architecture.md` once implemented (new modules, request-flow diagram, conversation-state storage)
+
+**Explicit non-goal for this pass:** per-user Spotify/HA credentials (schema leaves room via a future `user_integrations` table, not built now).
+
 ---
 
 ## Phase 4 — Web Client
@@ -150,6 +167,6 @@ This phase is intentionally loose — the right shape will be clearer after Phas
 
 ## What Is Not In Scope Yet
 
-- Authentication / multi-user support
 - Cloud deployment (this is a home server)
 - Model fine-tuning
+- Per-user integration credentials (Spotify/HA) — schema seam left open, not built (see [[Decisions]] 2026-07-02)
